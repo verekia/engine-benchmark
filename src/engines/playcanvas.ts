@@ -2,7 +2,7 @@ import type { EngineAdapter, BackendType } from '../types'
 import * as pc from 'playcanvas'
 
 export class PlayCanvasAdapter implements EngineAdapter {
-  private app!: pc.Application
+  private app!: pc.AppBase
   private cubes: pc.Entity[] = []
   private dirLightEntity!: pc.Entity
   private shadowsEnabled = false
@@ -15,13 +15,25 @@ export class PlayCanvasAdapter implements EngineAdapter {
 
     const device = await pc.createGraphicsDevice(canvas, {
       deviceTypes,
-      glslangUrl: undefined as any,
-      twgslUrl: undefined as any,
+      antialias: true,
+      powerPreference: 'high-performance',
     })
+    device.maxPixelRatio = Math.min(window.devicePixelRatio, 2)
 
-    const app = new pc.Application(canvas, {
-      graphicsDevice: device,
-    })
+    const createOptions = new pc.AppOptions()
+    createOptions.graphicsDevice = device
+    createOptions.componentSystems = [
+      pc.RenderComponentSystem,
+      pc.CameraComponentSystem,
+      pc.LightComponentSystem,
+    ]
+    createOptions.resourceHandlers = [
+      pc.TextureHandler,
+      pc.ContainerHandler,
+    ]
+
+    const app = new pc.AppBase(canvas)
+    app.init(createOptions)
     this.app = app
 
     app.setCanvasFillMode(pc.FILLMODE_FILL_WINDOW)
@@ -39,7 +51,7 @@ export class PlayCanvasAdapter implements EngineAdapter {
     camera.lookAt(0, 0, 0)
     app.root.addChild(camera)
 
-    // Ambient light (hemispheric via scene ambient)
+    // Ambient light via scene ambient
     app.scene.ambientLight = new pc.Color(0.25, 0.25, 0.25)
 
     // Directional light
@@ -82,15 +94,13 @@ export class PlayCanvasAdapter implements EngineAdapter {
 
       const material = new pc.StandardMaterial()
       material.diffuse = new pc.Color(Math.random(), Math.random(), Math.random())
+      material.specular = new pc.Color(0, 0, 0)
+      material.gloss = 0
       material.update()
 
-      // Create a box mesh
-      const mesh = pc.Mesh.fromGeometry(this.app.graphicsDevice, new pc.BoxGeometry())
-      const meshInstance = new pc.MeshInstance(mesh, material)
-      meshInstance.castShadow = this.shadowsEnabled
-
       entity.addComponent('render', {
-        meshInstances: [meshInstance],
+        type: 'box',
+        material,
         castShadows: this.shadowsEnabled,
         receiveShadows: this.shadowsEnabled,
       })
@@ -122,7 +132,6 @@ export class PlayCanvasAdapter implements EngineAdapter {
     for (const cube of this.cubes) {
       cube.rotateLocal(speed * dt * 57.3, speed * dt * 0.7 * 57.3, 0)
     }
-    // PlayCanvas has its own internal render loop via app.start()
   }
 
   dispose() {
