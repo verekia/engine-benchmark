@@ -69,6 +69,7 @@ export class BabylonAdapter implements EngineAdapter {
       const box = MeshBuilder.CreateBox(`cube_${this.cubes.length}`, { size: 1 }, this.scene)
       const mat = new StandardMaterial(`mat_${this.cubes.length}`, this.scene)
       mat.diffuseColor = new Color3(Math.random(), Math.random(), Math.random())
+      mat.specularColor = Color3.Black()
       box.material = mat
       box.position = new Vector3(
         (Math.random() - 0.5) * spread,
