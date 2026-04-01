@@ -114,7 +114,7 @@ export class VoidcoreAdapter implements EngineAdapter {
     )
 
     this.engine.maxFps = 0 // uncapped
-    this.engine.maxDpr = false as any
+    this.engine.maxDpr = Infinity // uncapped
     this.engine.start()
   }
 

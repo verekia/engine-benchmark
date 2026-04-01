@@ -1,7 +1,7 @@
 import GUI from 'lil-gui'
 import type { EngineName, BackendType, UseCase, EngineAdapter } from './types'
 
-const canvas = document.getElementById('canvas') as HTMLCanvasElement
+let canvas = document.getElementById('canvas') as HTMLCanvasElement
 const statsEl = document.getElementById('stats') as HTMLDivElement
 
 let currentAdapter: EngineAdapter | null = null
@@ -52,16 +52,18 @@ async function restart() {
   const parent = canvas.parentElement!
   const newCanvas = document.createElement('canvas')
   newCanvas.id = 'canvas'
+  newCanvas.style.cssText = canvas.style.cssText
   parent.replaceChild(newCanvas, canvas)
-  // Update reference
-  ;(document.getElementById('canvas') as HTMLCanvasElement).style.cssText = canvas.style.cssText
-  const activeCanvas = document.getElementById('canvas') as HTMLCanvasElement
+  canvas = newCanvas
 
   statsEl.textContent = `Loading ${params.engine} (${params.backend}) – ${params.useCase}...`
 
+  // Wait one frame so the browser lays out the new canvas (clientWidth/Height > 0)
+  await new Promise(resolve => requestAnimationFrame(resolve))
+
   try {
     const adapter = await loadAdapter(params.engine)
-    await adapter.init(activeCanvas, params.backend, params.useCase)
+    await adapter.init(canvas, params.backend, params.useCase)
     currentAdapter = adapter
 
     adapter.setMeshCount(params.meshCount)
