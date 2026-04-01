@@ -1,14 +1,27 @@
-import type { EngineAdapter, BackendType } from '../types'
+import type { EngineAdapter, BackendType, UseCase } from '../types'
 import * as pc from 'playcanvas'
+
+interface SkinnedCharacter {
+  entity: pc.Entity
+  stateGraphAsset?: pc.Asset
+}
 
 export class PlayCanvasAdapter implements EngineAdapter {
   private app!: pc.AppBase
   private cubes: pc.Entity[] = []
+  private characters: SkinnedCharacter[] = []
   private dirLightEntity!: pc.Entity
   private shadowsEnabled = false
   private root!: pc.Entity
+  private useCase: UseCase = 'boxes'
+  private containerAsset: pc.Asset | null = null
+  private containerResource: any = null
+  private animClipNames: string[] = []
+  private animClipDurations: number[] = []
 
-  async init(canvas: HTMLCanvasElement, backend: BackendType) {
+  async init(canvas: HTMLCanvasElement, backend: BackendType, useCase: UseCase) {
+    this.useCase = useCase
+
     const deviceTypes = backend === 'webgpu'
       ? [pc.DEVICETYPE_WEBGPU, pc.DEVICETYPE_WEBGL2]
       : [pc.DEVICETYPE_WEBGL2]
@@ -22,14 +35,23 @@ export class PlayCanvasAdapter implements EngineAdapter {
 
     const createOptions = new pc.AppOptions()
     createOptions.graphicsDevice = device
-    createOptions.componentSystems = [
+
+    const componentSystems: any[] = [
       pc.RenderComponentSystem,
       pc.CameraComponentSystem,
       pc.LightComponentSystem,
     ]
+
+    if (useCase === 'skinned-mesh') {
+      componentSystems.push(pc.AnimComponentSystem)
+    }
+
+    createOptions.componentSystems = componentSystems
     createOptions.resourceHandlers = [
       pc.TextureHandler,
       pc.ContainerHandler,
+      pc.AnimClipHandler,
+      pc.AnimStateGraphHandler,
     ]
 
     const app = new pc.AppBase(canvas)
@@ -47,7 +69,11 @@ export class PlayCanvasAdapter implements EngineAdapter {
       nearClip: 0.1,
       fov: 60,
     })
-    camera.setPosition(0, 40, 60)
+    if (useCase === 'boxes') {
+      camera.setPosition(0, 40, 60)
+    } else {
+      camera.setPosition(0, 15, 40)
+    }
     camera.lookAt(0, 0, 0)
     app.root.addChild(camera)
 
@@ -69,20 +95,59 @@ export class PlayCanvasAdapter implements EngineAdapter {
     this.dirLightEntity.setEulerAngles(45, 30, 0)
     app.root.addChild(this.dirLightEntity)
 
-    // Container for cubes
-    this.root = new pc.Entity('cubeRoot')
+    // Container for meshes
+    this.root = new pc.Entity('meshRoot')
     app.root.addChild(this.root)
 
     app.start()
 
+    if (useCase === 'skinned-mesh') {
+      await this.loadModel()
+    }
+
     window.addEventListener('resize', this.onResize)
+  }
+
+  private async loadModel() {
+    return new Promise<void>((resolve, reject) => {
+      this.containerAsset = new pc.Asset('michelle', 'container', {
+        url: '/models/Michelle.glb',
+      })
+      this.containerAsset.on('load', () => {
+        this.containerResource = this.containerAsset!.resource
+
+        // Extract animation info
+        const animations = this.containerResource.animations
+        if (animations) {
+          for (let i = 0; i < animations.length; i++) {
+            const anim = animations[i]
+            this.animClipNames.push(anim.name || `clip_${i}`)
+            this.animClipDurations.push(anim.resource?.duration || anim.duration || 1)
+          }
+        }
+        resolve()
+      })
+      this.containerAsset.on('error', (err: string) => {
+        reject(new Error(`Failed to load model: ${err}`))
+      })
+      this.app.assets.add(this.containerAsset)
+      this.app.assets.load(this.containerAsset)
+    })
   }
 
   private onResize = () => {
     this.app.resizeCanvas()
   }
 
-  setCubeCount(count: number) {
+  setMeshCount(count: number) {
+    if (this.useCase === 'boxes') {
+      this.setBoxCount(count)
+    } else {
+      this.setCharacterCount(count)
+    }
+  }
+
+  private setBoxCount(count: number) {
     while (this.cubes.length > count) {
       const cube = this.cubes.pop()!
       cube.destroy()
@@ -116,6 +181,96 @@ export class PlayCanvasAdapter implements EngineAdapter {
     }
   }
 
+  private setCharacterCount(count: number) {
+    if (!this.containerResource) return
+
+    // Remove excess characters
+    while (this.characters.length > count) {
+      const char = this.characters.pop()!
+      char.entity.destroy()
+    }
+
+    // Add missing characters
+    const cols = Math.ceil(Math.sqrt(count))
+    const spacing = 2
+    const numAnims = this.animClipNames.length
+
+    while (this.characters.length < count) {
+      const i = this.characters.length
+      const entity = this.containerResource.instantiateRenderEntity()
+      entity.name = `character_${i}`
+
+      // Grid layout
+      const row = Math.floor(i / cols)
+      const col = i % cols
+      entity.setPosition(
+        (col - cols / 2) * spacing,
+        0,
+        (row - cols / 2) * spacing,
+      )
+      entity.setLocalScale(0.01, 0.01, 0.01)
+
+      // Set shadow properties
+      this.setEntityShadows(entity, this.shadowsEnabled)
+
+      this.root.addChild(entity)
+
+      // Set up animation
+      if (numAnims > 0) {
+        const animIndex = numAnims > 1 ? i % numAnims : 0
+        entity.addComponent('anim', {
+          activate: true,
+          speed: 1,
+        })
+
+        // Create a simple state graph with a single dancing state
+        const stateGraphData = {
+          layers: [{
+            name: 'Base',
+            states: [
+              { name: 'START' },
+              { name: 'Dance', speed: 1 },
+            ],
+            transitions: [{
+              from: 'START',
+              to: 'Dance',
+              time: 0,
+              priority: 0,
+            }],
+          }],
+          parameters: {},
+        }
+
+        entity.anim!.loadStateGraph(stateGraphData)
+
+        // Assign the animation track to the Dance state
+        const animations = this.containerResource.animations
+        if (animations && animations[animIndex]) {
+          const animTrack = animations[animIndex].resource
+          entity.anim!.assignAnimation('Base.Dance', animTrack)
+
+          // Offset the animation time so characters are not in sync
+          const duration = this.animClipDurations[animIndex] || 1
+          const timeOffset = (i / count) * duration
+          const baseLayer = entity.anim!.baseLayer
+          if (baseLayer) {
+            baseLayer.activeStateCurrentTime = timeOffset
+          }
+        }
+      }
+
+      this.characters.push({ entity })
+    }
+  }
+
+  private setEntityShadows(entity: pc.Entity, enabled: boolean) {
+    const renders = entity.findComponents('render') as pc.RenderComponent[]
+    for (const render of renders) {
+      render.castShadows = enabled
+      render.receiveShadows = enabled
+    }
+  }
+
   setShadows(enabled: boolean) {
     this.shadowsEnabled = enabled
     this.dirLightEntity.light!.castShadows = enabled
@@ -125,13 +280,19 @@ export class PlayCanvasAdapter implements EngineAdapter {
         cube.render.receiveShadows = enabled
       }
     }
+    for (const char of this.characters) {
+      this.setEntityShadows(char.entity, enabled)
+    }
   }
 
   render(dt: number) {
-    const speed = 1.0
-    for (const cube of this.cubes) {
-      cube.rotateLocal(speed * dt * 57.3, speed * dt * 0.7 * 57.3, 0)
+    if (this.useCase === 'boxes') {
+      const speed = 1.0
+      for (const cube of this.cubes) {
+        cube.rotateLocal(speed * dt * 57.3, speed * dt * 0.7 * 57.3, 0)
+      }
     }
+    // PlayCanvas handles animation updates internally via the AnimComponent system
   }
 
   dispose() {
@@ -139,7 +300,15 @@ export class PlayCanvasAdapter implements EngineAdapter {
     for (const cube of this.cubes) {
       cube.destroy()
     }
+    for (const char of this.characters) {
+      char.entity.destroy()
+    }
     this.cubes = []
+    this.characters = []
+    this.containerAsset = null
+    this.containerResource = null
+    this.animClipNames = []
+    this.animClipDurations = []
     this.app.destroy()
   }
 

@@ -1,5 +1,5 @@
 import GUI from 'lil-gui'
-import type { EngineName, BackendType, EngineAdapter } from './types'
+import type { EngineName, BackendType, UseCase, EngineAdapter } from './types'
 
 const canvas = document.getElementById('canvas') as HTMLCanvasElement
 const statsEl = document.getElementById('stats') as HTMLDivElement
@@ -11,7 +11,8 @@ let lastTime = 0
 const params = {
   engine: 'threejs' as EngineName,
   backend: 'webgpu' as BackendType,
-  cubeCount: 500,
+  useCase: 'boxes' as UseCase,
+  meshCount: 500,
   shadows: false,
 }
 
@@ -56,14 +57,14 @@ async function restart() {
   ;(document.getElementById('canvas') as HTMLCanvasElement).style.cssText = canvas.style.cssText
   const activeCanvas = document.getElementById('canvas') as HTMLCanvasElement
 
-  statsEl.textContent = `Loading ${params.engine} (${params.backend})...`
+  statsEl.textContent = `Loading ${params.engine} (${params.backend}) – ${params.useCase}...`
 
   try {
     const adapter = await loadAdapter(params.engine)
-    await adapter.init(activeCanvas, params.backend)
+    await adapter.init(activeCanvas, params.backend, params.useCase)
     currentAdapter = adapter
 
-    adapter.setCubeCount(params.cubeCount)
+    adapter.setMeshCount(params.meshCount)
     adapter.setShadows(params.shadows)
 
     statsEl.textContent = adapter.getInfo()
@@ -72,6 +73,8 @@ async function restart() {
     lastTime = performance.now()
     let frameCount = 0
     let fpsTime = 0
+
+    const meshLabel = params.useCase === 'boxes' ? 'cubes' : 'characters'
 
     const loop = (now: number) => {
       animFrameId = requestAnimationFrame(loop)
@@ -84,7 +87,7 @@ async function restart() {
       fpsTime += dt
       if (fpsTime >= 0.5) {
         const fps = Math.round(frameCount / fpsTime)
-        statsEl.textContent = `${adapter.getInfo()} | ${params.cubeCount} cubes | FPS: ${fps}`
+        statsEl.textContent = `${adapter.getInfo()} | ${params.meshCount} ${meshLabel} | FPS: ${fps}`
         frameCount = 0
         fpsTime = 0
       }
@@ -104,8 +107,22 @@ gui.domElement.style.right = '0'
 
 gui.add(params, 'engine', ['threejs', 'playcanvas', 'babylonjs', 'voidcore']).name('Engine').onChange(() => restart())
 gui.add(params, 'backend', ['webgl', 'webgpu']).name('Backend').onChange(() => restart())
-gui.add(params, 'cubeCount', 100, 5000, 100).name('Cube Count').onChange((v: number) => {
-  if (currentAdapter) currentAdapter.setCubeCount(v)
+gui.add(params, 'useCase', ['boxes', 'skinned-mesh']).name('Use Case').onChange(() => {
+  // Adjust count range for skinned mesh
+  if (params.useCase === 'skinned-mesh') {
+    meshCountCtrl.min(100).max(3000).step(100)
+    if (params.meshCount > 3000) {
+      params.meshCount = 3000
+      meshCountCtrl.updateDisplay()
+    }
+  } else {
+    meshCountCtrl.min(100).max(5000).step(100)
+  }
+  restart()
+})
+
+const meshCountCtrl = gui.add(params, 'meshCount', 100, 5000, 100).name('Mesh Count').onChange((v: number) => {
+  if (currentAdapter) currentAdapter.setMeshCount(v)
 })
 gui.add(params, 'shadows').name('Shadows').onChange((v: boolean) => {
   if (currentAdapter) currentAdapter.setShadows(v)
