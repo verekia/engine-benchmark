@@ -1,0 +1,30 @@
+{
+  "name": "engine-benchmark",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://local_proxy@127.0.0.1:42699/git/verekia/engine-benchmark"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "typescript": "^6.0.2",
+    "vite": "^8.0.3"
+  },
+  "dependencies": {
+    "@babylonjs/core": "^9.0.0",
+    "@types/three": "^0.183.1",
+    "lil-gui": "^0.21.0",
+    "playcanvas": "^2.17.2",
+    "three": "^0.183.2",
+    "voidcore": "^0.0.14"
+  }
+}
