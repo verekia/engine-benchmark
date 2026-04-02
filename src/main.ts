@@ -88,7 +88,11 @@ async function restart() {
     let frameCount = 0
     let fpsTime = 0
 
-    const meshLabel = params.useCase === 'boxes' ? 'cubes' : 'characters'
+    const meshLabel = params.useCase === 'boxes'
+      ? 'cubes'
+      : params.useCase === 'skinned-mesh'
+        ? 'characters'
+        : 'tetrahedra'
 
     const loop = (now: number) => {
       animFrameId = requestAnimationFrame(loop)
@@ -121,10 +125,16 @@ gui.domElement.style.right = '0'
 
 gui.add(params, 'engine', ['threejs', 'playcanvas', 'babylonjs', 'voidcore', 'experiment-a', 'experiment-b', 'experiment-c']).name('Engine').onChange(() => restart())
 gui.add(params, 'backend', ['webgl', 'webgpu']).name('Backend').onChange(() => restart())
-gui.add(params, 'useCase', ['boxes', 'skinned-mesh']).name('Use Case').onChange(() => {
+gui.add(params, 'useCase', ['boxes', 'skinned-mesh', 'unique-tetrahedra']).name('Use Case').onChange(() => {
   if (params.useCase === 'skinned-mesh') {
     meshCountCtrl.options([100, 500, 1000, 2000])
     if (params.meshCount > 2000) {
+      params.meshCount = 1000
+      meshCountCtrl.updateDisplay()
+    }
+  } else if (params.useCase === 'unique-tetrahedra') {
+    meshCountCtrl.options([100, 250, 500, 1000, 2000, 5000, 10000, 15000, 20000])
+    if (params.meshCount > 20000 || params.meshCount < 100) {
       params.meshCount = 1000
       meshCountCtrl.updateDisplay()
     }

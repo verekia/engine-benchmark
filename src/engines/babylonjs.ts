@@ -1,4 +1,5 @@
 import type { EngineAdapter, BackendType, UseCase } from '../types'
+import { createUniqueTetrahedronSpec, type BufferGeometryData } from '../benchmark-scene'
 import {
   Engine,
   WebGPUEngine,
@@ -15,6 +16,8 @@ import {
   SceneLoader,
   AnimationGroup,
   TransformNode,
+  Mesh as BabylonMesh,
+  VertexData,
 } from '@babylonjs/core'
 import '@babylonjs/loaders/glTF'
 
@@ -23,12 +26,19 @@ interface SkinnedCharacter {
   animationGroups: AnimationGroup[]
 }
 
+interface AnimatedStaticMesh {
+  mesh: BabylonMesh
+  material: StandardMaterial
+  rotationSpeed: [number, number, number]
+}
+
 export class BabylonAdapter implements EngineAdapter {
   private engine!: Engine | WebGPUEngine
   private scene!: Scene
   private dirLight!: DirectionalLight
   private shadowGen: ShadowGenerator | null = null
-  private cubes: InstanceType<typeof import('@babylonjs/core').Mesh>[] = []
+  private boxes: AnimatedStaticMesh[] = []
+  private tetrahedra: AnimatedStaticMesh[] = []
   private characters: SkinnedCharacter[] = []
   private shadowsEnabled = false
   private canvas!: HTMLCanvasElement
@@ -50,12 +60,12 @@ export class BabylonAdapter implements EngineAdapter {
     this.scene = new Scene(this.engine)
     this.scene.clearColor = new Color4(0, 0, 0, 1)
 
-    if (useCase === 'boxes') {
-      const camera = new ArcRotateCamera('camera', -Math.PI / 4, Math.PI / 3, 80, Vector3.Zero(), this.scene)
+    if (useCase === 'skinned-mesh') {
+      const camera = new ArcRotateCamera('camera', -Math.PI / 4, Math.PI / 3, 50, new Vector3(0, 5, 0), this.scene)
       camera.minZ = 0.1
       camera.attachControl(canvas, true)
     } else {
-      const camera = new ArcRotateCamera('camera', -Math.PI / 4, Math.PI / 3, 50, new Vector3(0, 5, 0), this.scene)
+      const camera = new ArcRotateCamera('camera', -Math.PI / 4, Math.PI / 3, 80, Vector3.Zero(), this.scene)
       camera.minZ = 0.1
       camera.attachControl(canvas, true)
     }
@@ -68,7 +78,6 @@ export class BabylonAdapter implements EngineAdapter {
     this.dirLight.intensity = 1.5
 
     if (useCase === 'skinned-mesh') {
-      // Load model as asset container for cloning
       this.baseContainer = await SceneLoader.LoadAssetContainerAsync(
         '/models/',
         'Michelle.glb',
@@ -79,6 +88,24 @@ export class BabylonAdapter implements EngineAdapter {
     window.addEventListener('resize', this.onResize)
   }
 
+  private createCustomMesh(name: string, data: BufferGeometryData) {
+    const mesh = new BabylonMesh(name, this.scene)
+    const vertexData = new VertexData()
+    vertexData.positions = Array.from(data.positions)
+    vertexData.normals = Array.from(data.normals)
+    vertexData.indices = Array.from(data.indices)
+    vertexData.applyToMesh(mesh, false)
+    return mesh
+  }
+
+  private disposeAnimatedMesh(entry: AnimatedStaticMesh) {
+    if (this.shadowGen) {
+      this.shadowGen.removeShadowCaster(entry.mesh)
+    }
+    entry.material.dispose()
+    entry.mesh.dispose()
+  }
+
   private onResize = () => {
     this.engine.resize()
   }
@@ -86,46 +113,78 @@ export class BabylonAdapter implements EngineAdapter {
   setMeshCount(count: number) {
     if (this.useCase === 'boxes') {
       this.setBoxCount(count)
+    } else if (this.useCase === 'unique-tetrahedra') {
+      this.setUniqueTetrahedronCount(count)
     } else {
       this.setCharacterCount(count)
     }
   }
 
   private setBoxCount(count: number) {
-    while (this.cubes.length > count) {
-      const cube = this.cubes.pop()!
-      if (this.shadowGen) {
-        this.shadowGen.removeShadowCaster(cube)
-      }
-      cube.dispose()
+    while (this.boxes.length > count) {
+      const box = this.boxes.pop()!
+      this.disposeAnimatedMesh(box)
     }
 
     const spread = 50
-    while (this.cubes.length < count) {
-      const box = MeshBuilder.CreateBox(`cube_${this.cubes.length}`, { size: 1 }, this.scene)
-      const mat = new StandardMaterial(`mat_${this.cubes.length}`, this.scene)
-      mat.diffuseColor = new Color3(Math.random(), Math.random(), Math.random())
-      mat.specularColor = Color3.Black()
-      box.material = mat
-      box.position = new Vector3(
+    while (this.boxes.length < count) {
+      const mesh = MeshBuilder.CreateBox(`cube_${this.boxes.length}`, { size: 1 }, this.scene)
+      const material = new StandardMaterial(`mat_${this.boxes.length}`, this.scene)
+      material.diffuseColor = new Color3(Math.random(), Math.random(), Math.random())
+      material.specularColor = Color3.Black()
+      mesh.material = material
+      mesh.position = new Vector3(
         (Math.random() - 0.5) * spread,
         (Math.random() - 0.5) * spread,
         (Math.random() - 0.5) * spread,
       )
 
       if (this.shadowsEnabled && this.shadowGen) {
-        this.shadowGen.addShadowCaster(box)
-        box.receiveShadows = true
+        this.shadowGen.addShadowCaster(mesh)
+        mesh.receiveShadows = true
       }
 
-      this.cubes.push(box)
+      this.boxes.push({
+        mesh,
+        material,
+        rotationSpeed: [1.0, 0.7, 0],
+      })
+    }
+  }
+
+  private setUniqueTetrahedronCount(count: number) {
+    while (this.tetrahedra.length > count) {
+      const tetra = this.tetrahedra.pop()!
+      this.disposeAnimatedMesh(tetra)
+    }
+
+    while (this.tetrahedra.length < count) {
+      const index = this.tetrahedra.length
+      const spec = createUniqueTetrahedronSpec(index)
+      const mesh = this.createCustomMesh(`tetra_${index}`, spec.geometry)
+      const material = new StandardMaterial(`tetra_mat_${index}`, this.scene)
+      material.diffuseColor = new Color3(...spec.material.color)
+      material.specularColor = Color3.Black()
+      mesh.material = material
+      mesh.position = new Vector3(...spec.position)
+      mesh.rotation = new Vector3(...spec.rotation)
+
+      if (this.shadowsEnabled && this.shadowGen) {
+        this.shadowGen.addShadowCaster(mesh)
+        mesh.receiveShadows = true
+      }
+
+      this.tetrahedra.push({
+        mesh,
+        material,
+        rotationSpeed: spec.rotationSpeed,
+      })
     }
   }
 
   private setCharacterCount(count: number) {
     if (!this.baseContainer) return
 
-    // Remove excess characters
     while (this.characters.length > count) {
       const char = this.characters.pop()!
       for (const ag of char.animationGroups) {
@@ -135,7 +194,6 @@ export class BabylonAdapter implements EngineAdapter {
       char.root.dispose()
     }
 
-    // Add missing characters
     const cols = Math.ceil(Math.sqrt(count))
     const spacing = 2
     const containerAnimGroups = this.baseContainer.animationGroups as AnimationGroup[]
@@ -143,8 +201,6 @@ export class BabylonAdapter implements EngineAdapter {
 
     while (this.characters.length < count) {
       const i = this.characters.length
-
-      // Instantiate a new copy from the container
       const instance = this.baseContainer.instantiateModelsToScene(
         (name: string) => `${name}_${i}`,
         false,
@@ -153,7 +209,6 @@ export class BabylonAdapter implements EngineAdapter {
       const root = instance.rootNodes[0] as TransformNode
       const animGroups = instance.animationGroups as AnimationGroup[]
 
-      // Grid layout
       const row = Math.floor(i / cols)
       const col = i % cols
       root.position = new Vector3(
@@ -163,24 +218,18 @@ export class BabylonAdapter implements EngineAdapter {
       )
       root.scaling = new Vector3(0.01, 0.01, 0.01)
 
-      // Alternate animations if multiple exist
       const animIndex = totalAnimCount > 1 ? i % totalAnimCount : 0
-
-      // Stop all animation groups, then play the selected one
       for (const ag of animGroups) {
         ag.stop()
       }
       if (animGroups.length > animIndex) {
         const ag = animGroups[animIndex]
         ag.start(true)
-
-        // Offset animation time
         const duration = ag.to - ag.from
         const timeOffset = (i / count) * duration
         ag.goToFrame(ag.from + timeOffset)
       }
 
-      // Set shadow properties on meshes
       if (this.shadowsEnabled && this.shadowGen) {
         for (const mesh of root.getChildMeshes()) {
           this.shadowGen.addShadowCaster(mesh)
@@ -198,9 +247,13 @@ export class BabylonAdapter implements EngineAdapter {
     if (enabled && !this.shadowGen) {
       this.shadowGen = new ShadowGenerator(2048, this.dirLight)
       this.shadowGen.useBlurExponentialShadowMap = true
-      for (const cube of this.cubes) {
-        this.shadowGen.addShadowCaster(cube)
-        cube.receiveShadows = true
+      for (const box of this.boxes) {
+        this.shadowGen.addShadowCaster(box.mesh)
+        box.mesh.receiveShadows = true
+      }
+      for (const tetra of this.tetrahedra) {
+        this.shadowGen.addShadowCaster(tetra.mesh)
+        tetra.mesh.receiveShadows = true
       }
       for (const char of this.characters) {
         for (const mesh of char.root.getChildMeshes()) {
@@ -211,8 +264,11 @@ export class BabylonAdapter implements EngineAdapter {
     } else if (!enabled && this.shadowGen) {
       this.shadowGen.dispose()
       this.shadowGen = null
-      for (const cube of this.cubes) {
-        cube.receiveShadows = false
+      for (const box of this.boxes) {
+        box.mesh.receiveShadows = false
+      }
+      for (const tetra of this.tetrahedra) {
+        tetra.mesh.receiveShadows = false
       }
       for (const char of this.characters) {
         for (const mesh of char.root.getChildMeshes()) {
@@ -223,16 +279,20 @@ export class BabylonAdapter implements EngineAdapter {
   }
 
   render(dt: number) {
-    if (this.useCase === 'boxes') {
-      const speed = 1.0
-      for (const cube of this.cubes) {
-        cube.rotation.x += speed * dt
-        cube.rotation.y += speed * dt * 0.7
+    const staticMeshes = this.useCase === 'boxes'
+      ? this.boxes
+      : this.useCase === 'unique-tetrahedra'
+        ? this.tetrahedra
+        : null
+
+    if (staticMeshes) {
+      for (const entry of staticMeshes) {
+        entry.mesh.rotation.x += entry.rotationSpeed[0] * dt
+        entry.mesh.rotation.y += entry.rotationSpeed[1] * dt
+        entry.mesh.rotation.z += entry.rotationSpeed[2] * dt
       }
     }
-    // beginFrame/endFrame are required for WebGPU — they manage command encoder
-    // lifecycle and flush GPU command buffers. Without them, commands accumulate
-    // and the swapchain texture expires before submission.
+
     this.engine.beginFrame()
     this.scene.render()
     this.engine.endFrame()
@@ -244,6 +304,13 @@ export class BabylonAdapter implements EngineAdapter {
       this.shadowGen.dispose()
       this.shadowGen = null
     }
+
+    for (const box of this.boxes) {
+      this.disposeAnimatedMesh(box)
+    }
+    for (const tetra of this.tetrahedra) {
+      this.disposeAnimatedMesh(tetra)
+    }
     for (const char of this.characters) {
       for (const ag of char.animationGroups) {
         ag.stop()
@@ -251,6 +318,9 @@ export class BabylonAdapter implements EngineAdapter {
       }
       char.root.dispose()
     }
+
+    this.boxes = []
+    this.tetrahedra = []
     this.characters = []
     if (this.baseContainer) {
       this.baseContainer.dispose()
@@ -258,7 +328,6 @@ export class BabylonAdapter implements EngineAdapter {
     }
     this.scene.dispose()
     this.engine.dispose()
-    this.cubes = []
   }
 
   getInfo(): string {

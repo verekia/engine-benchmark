@@ -1,4 +1,5 @@
 import type { EngineAdapter, BackendType, UseCase } from '../types'
+import { createUniqueTetrahedronSpec, type BufferGeometryData } from '../benchmark-scene'
 import {
   Scene,
   PerspectiveCamera,
@@ -14,6 +15,7 @@ import {
   Object3D,
   Group,
 } from 'three/webgpu'
+import { BufferGeometry, Float32BufferAttribute } from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js'
@@ -23,15 +25,23 @@ interface SkinnedCharacter {
   mixer: AnimationMixer
 }
 
+interface AnimatedStaticMesh {
+  mesh: Mesh
+  material: MeshLambertMaterial
+  geometry: BufferGeometry
+  rotationSpeed: [number, number, number]
+}
+
 export class ThreeAdapter implements EngineAdapter {
   private renderer!: WebGPURenderer
   private scene!: Scene
   private camera!: PerspectiveCamera
-  private cubes: Mesh[] = []
+  private boxes: AnimatedStaticMesh[] = []
+  private tetrahedra: AnimatedStaticMesh[] = []
   private characters: SkinnedCharacter[] = []
   private controls!: OrbitControls
   private dirLight!: DirectionalLight
-  private geometry!: BoxGeometry
+  private boxGeometry: BoxGeometry | null = null
   private shadowsEnabled = false
   private useCase: UseCase = 'boxes'
   private baseModel: Group | null = null
@@ -72,22 +82,35 @@ export class ThreeAdapter implements EngineAdapter {
     this.scene.add(this.dirLight)
 
     if (useCase === 'boxes') {
-      this.geometry = new BoxGeometry(1, 1, 1)
-    } else {
-      // Load the skinned mesh model
+      this.boxGeometry = new BoxGeometry(1, 1, 1)
+    } else if (useCase === 'skinned-mesh') {
       const loader = new GLTFLoader()
       const gltf = await loader.loadAsync('/models/Michelle.glb')
       this.baseModel = gltf.scene
       this.animations = gltf.animations
-      // Scale the model to a reasonable size
       this.baseModel.scale.set(0.01, 0.01, 0.01)
 
-      // Set up camera for character viewing
       this.camera.position.set(0, 15, 40)
       this.controls.target.set(0, 5, 0)
     }
 
     window.addEventListener('resize', this.onResize)
+  }
+
+  private createBufferGeometry(data: BufferGeometryData) {
+    const geometry = new BufferGeometry()
+    geometry.setAttribute('position', new Float32BufferAttribute(data.positions, 3))
+    geometry.setAttribute('normal', new Float32BufferAttribute(data.normals, 3))
+    geometry.setIndex(Array.from(data.indices))
+    return geometry
+  }
+
+  private disposeAnimatedMesh(entry: AnimatedStaticMesh, disposeGeometry: boolean) {
+    this.scene.remove(entry.mesh)
+    entry.material.dispose()
+    if (disposeGeometry) {
+      entry.geometry.dispose()
+    }
   }
 
   private onResize = () => {
@@ -102,23 +125,24 @@ export class ThreeAdapter implements EngineAdapter {
   setMeshCount(count: number) {
     if (this.useCase === 'boxes') {
       this.setBoxCount(count)
+    } else if (this.useCase === 'unique-tetrahedra') {
+      this.setUniqueTetrahedronCount(count)
     } else {
       this.setCharacterCount(count)
     }
   }
 
   private setBoxCount(count: number) {
-    while (this.cubes.length > count) {
-      const cube = this.cubes.pop()!
-      this.scene.remove(cube)
-      ;(cube.material as MeshLambertMaterial).dispose()
+    while (this.boxes.length > count) {
+      const box = this.boxes.pop()!
+      this.disposeAnimatedMesh(box, false)
     }
 
     const spread = 50
-    while (this.cubes.length < count) {
+    while (this.boxes.length < count) {
       const color = new Color(Math.random(), Math.random(), Math.random())
-      const mat = new MeshLambertMaterial({ color })
-      const mesh = new Mesh(this.geometry, mat)
+      const material = new MeshLambertMaterial({ color })
+      const mesh = new Mesh(this.boxGeometry!, material)
       mesh.position.set(
         (Math.random() - 0.5) * spread,
         (Math.random() - 0.5) * spread,
@@ -127,28 +151,59 @@ export class ThreeAdapter implements EngineAdapter {
       mesh.castShadow = this.shadowsEnabled
       mesh.receiveShadow = this.shadowsEnabled
       this.scene.add(mesh)
-      this.cubes.push(mesh)
+
+      this.boxes.push({
+        mesh,
+        material,
+        geometry: this.boxGeometry!,
+        rotationSpeed: [1.0, 0.7, 0],
+      })
+    }
+  }
+
+  private setUniqueTetrahedronCount(count: number) {
+    while (this.tetrahedra.length > count) {
+      const tetra = this.tetrahedra.pop()!
+      this.disposeAnimatedMesh(tetra, true)
+    }
+
+    while (this.tetrahedra.length < count) {
+      const spec = createUniqueTetrahedronSpec(this.tetrahedra.length)
+      const geometry = this.createBufferGeometry(spec.geometry)
+      const material = new MeshLambertMaterial({
+        color: new Color(...spec.material.color),
+      })
+      const mesh = new Mesh(geometry, material)
+      mesh.position.set(...spec.position)
+      mesh.rotation.set(...spec.rotation)
+      mesh.castShadow = this.shadowsEnabled
+      mesh.receiveShadow = this.shadowsEnabled
+      this.scene.add(mesh)
+
+      this.tetrahedra.push({
+        mesh,
+        material,
+        geometry,
+        rotationSpeed: spec.rotationSpeed,
+      })
     }
   }
 
   private setCharacterCount(count: number) {
     if (!this.baseModel || this.animations.length === 0) return
 
-    // Remove excess characters
     while (this.characters.length > count) {
       const char = this.characters.pop()!
       char.mixer.stopAllAction()
       this.scene.remove(char.model)
     }
 
-    // Add missing characters
     const cols = Math.ceil(Math.sqrt(count))
     const spacing = 2
     while (this.characters.length < count) {
       const i = this.characters.length
       const clone = SkeletonUtils.clone(this.baseModel)
 
-      // Grid layout
       const row = Math.floor(i / cols)
       const col = i % cols
       clone.position.set(
@@ -169,13 +224,10 @@ export class ThreeAdapter implements EngineAdapter {
       this.scene.add(clone)
 
       const mixer = new AnimationMixer(clone)
-
-      // Alternate animations if multiple exist, otherwise just use the first
       const clipIndex = this.animations.length > 1 ? i % this.animations.length : 0
       const action = mixer.clipAction(this.animations[clipIndex])
       action.play()
 
-      // Offset animation time so characters are not in sync
       const duration = this.animations[clipIndex].duration
       const timeOffset = (i / count) * duration
       mixer.setTime(timeOffset)
@@ -189,9 +241,13 @@ export class ThreeAdapter implements EngineAdapter {
     this.renderer.shadowMap.enabled = enabled
     this.dirLight.castShadow = enabled
 
-    for (const cube of this.cubes) {
-      cube.castShadow = enabled
-      cube.receiveShadow = enabled
+    for (const box of this.boxes) {
+      box.mesh.castShadow = enabled
+      box.mesh.receiveShadow = enabled
+    }
+    for (const tetra of this.tetrahedra) {
+      tetra.mesh.castShadow = enabled
+      tetra.mesh.receiveShadow = enabled
     }
     for (const char of this.characters) {
       char.model.traverse((child) => {
@@ -204,36 +260,50 @@ export class ThreeAdapter implements EngineAdapter {
   }
 
   render(dt: number) {
-    if (this.useCase === 'boxes') {
-      const speed = 1.0
-      for (const cube of this.cubes) {
-        cube.rotation.x += speed * dt
-        cube.rotation.y += speed * dt * 0.7
+    const staticMeshes = this.useCase === 'boxes'
+      ? this.boxes
+      : this.useCase === 'unique-tetrahedra'
+        ? this.tetrahedra
+        : null
+
+    if (staticMeshes) {
+      for (const entry of staticMeshes) {
+        entry.mesh.rotation.x += entry.rotationSpeed[0] * dt
+        entry.mesh.rotation.y += entry.rotationSpeed[1] * dt
+        entry.mesh.rotation.z += entry.rotationSpeed[2] * dt
       }
     } else {
       for (const char of this.characters) {
         char.mixer.update(dt)
       }
     }
+
     this.renderer.render(this.scene, this.camera)
   }
 
   dispose() {
     window.removeEventListener('resize', this.onResize)
     this.controls.dispose()
-    for (const cube of this.cubes) {
-      (cube.material as MeshLambertMaterial).dispose()
+
+    for (const box of this.boxes) {
+      this.disposeAnimatedMesh(box, false)
+    }
+    for (const tetra of this.tetrahedra) {
+      this.disposeAnimatedMesh(tetra, true)
     }
     for (const char of this.characters) {
       char.mixer.stopAllAction()
       this.scene.remove(char.model)
     }
-    if (this.geometry) this.geometry.dispose()
-    this.renderer.dispose()
-    this.cubes = []
+
+    this.boxes = []
+    this.tetrahedra = []
     this.characters = []
     this.baseModel = null
     this.animations = []
+    this.boxGeometry?.dispose()
+    this.boxGeometry = null
+    this.renderer.dispose()
   }
 
   getInfo(): string {

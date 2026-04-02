@@ -1,82 +1,76 @@
 import type { EngineAdapter, BackendType, UseCase } from '../types'
-
-// --- WGSL Shader (storage buffer for per-instance data, Lambert lighting) ---
+import { createUniqueTetrahedronSpec, type BufferGeometryData } from '../benchmark-scene'
 
 const SHADER = /* wgsl */ `
 struct Scene {
   viewProj: mat4x4f,
   lightDir: vec4f,
   ambient: vec4f,
-  lightCol: vec4f,
+  lightColor: vec4f,
 }
 
-struct Instance {
-  col0: vec4f,
-  col1: vec4f,
-  col2: vec4f,
-  col3: vec4f,
+struct ObjectData {
+  model: mat4x4f,
   color: vec4f,
 }
 
 @group(0) @binding(0) var<uniform> scene: Scene;
-@group(0) @binding(1) var<storage, read> instances: array<Instance>;
+@group(1) @binding(0) var<storage, read> objectData: ObjectData;
 
-struct V {
+struct VSOut {
   @builtin(position) pos: vec4f,
-  @location(0) norm: vec3f,
-  @location(1) col: vec3f,
+  @location(0) normal: vec3f,
+  @location(1) color: vec3f,
 }
 
 @vertex fn vs(
-  @location(0) p: vec3f,
-  @location(1) n: vec3f,
-  @builtin(instance_index) i: u32,
-) -> V {
-  let inst = instances[i];
-  let m = mat4x4f(inst.col0, inst.col1, inst.col2, inst.col3);
-  let wp = m * vec4f(p, 1.0);
-  var o: V;
-  o.pos = scene.viewProj * wp;
-  o.norm = normalize((m * vec4f(n, 0.0)).xyz);
-  o.col = inst.color.rgb;
-  return o;
+  @location(0) position: vec3f,
+  @location(1) normal: vec3f,
+) -> VSOut {
+  var out: VSOut;
+  out.pos = scene.viewProj * objectData.model * vec4f(position, 1.0);
+  out.normal = normalize((objectData.model * vec4f(normal, 0.0)).xyz);
+  out.color = objectData.color.rgb;
+  return out;
 }
 
-@fragment fn fs(v: V) -> @location(0) vec4f {
-  let n = normalize(v.norm);
-  let d = max(dot(n, scene.lightDir.xyz), 0.0);
-  let c = v.col * (scene.ambient.rgb + scene.lightCol.rgb * d);
-  return vec4f(c, 1.0);
+@fragment fn fs(in: VSOut) -> @location(0) vec4f {
+  let light = max(dot(normalize(in.normal), scene.lightDir.xyz), 0.0);
+  let color = in.color * (scene.ambient.rgb + scene.lightColor.rgb * light);
+  return vec4f(color, 1.0);
 }
 `
 
-// --- Box geometry: 24 verts (indexed), interleaved pos(3) + normal(3) ---
-
-function createBoxGeometry() {
-  // prettier-ignore
-  const vertices = new Float32Array([
-    // +X
-     .5, -.5, -.5,  1, 0, 0,   .5,  .5, -.5,  1, 0, 0,   .5,  .5,  .5,  1, 0, 0,   .5, -.5,  .5,  1, 0, 0,
-    // -X
-    -.5, -.5,  .5, -1, 0, 0,  -.5,  .5,  .5, -1, 0, 0,  -.5,  .5, -.5, -1, 0, 0,  -.5, -.5, -.5, -1, 0, 0,
-    // +Y
-    -.5,  .5,  .5,  0, 1, 0,   .5,  .5,  .5,  0, 1, 0,   .5,  .5, -.5,  0, 1, 0,  -.5,  .5, -.5,  0, 1, 0,
-    // -Y
-    -.5, -.5, -.5,  0,-1, 0,   .5, -.5, -.5,  0,-1, 0,   .5, -.5,  .5,  0,-1, 0,  -.5, -.5,  .5,  0,-1, 0,
-    // +Z
-    -.5, -.5,  .5,  0, 0, 1,   .5, -.5,  .5,  0, 0, 1,   .5,  .5,  .5,  0, 0, 1,  -.5,  .5,  .5,  0, 0, 1,
-    // -Z
-     .5, -.5, -.5,  0, 0,-1,  -.5, -.5, -.5,  0, 0,-1,  -.5,  .5, -.5,  0, 0,-1,   .5,  .5, -.5,  0, 0,-1,
+function createBoxGeometryData(): BufferGeometryData {
+  const positions = new Float32Array([
+     0.5, -0.5, -0.5,   0.5,  0.5, -0.5,   0.5,  0.5,  0.5,   0.5, -0.5,  0.5,
+    -0.5, -0.5,  0.5,  -0.5,  0.5,  0.5,  -0.5,  0.5, -0.5,  -0.5, -0.5, -0.5,
+    -0.5,  0.5,  0.5,   0.5,  0.5,  0.5,   0.5,  0.5, -0.5,  -0.5,  0.5, -0.5,
+    -0.5, -0.5, -0.5,   0.5, -0.5, -0.5,   0.5, -0.5,  0.5,  -0.5, -0.5,  0.5,
+    -0.5, -0.5,  0.5,   0.5, -0.5,  0.5,   0.5,  0.5,  0.5,  -0.5,  0.5,  0.5,
+     0.5, -0.5, -0.5,  -0.5, -0.5, -0.5,  -0.5,  0.5, -0.5,   0.5,  0.5, -0.5,
   ])
-  // prettier-ignore
+
+  const normals = new Float32Array([
+     1, 0, 0,   1, 0, 0,   1, 0, 0,   1, 0, 0,
+    -1, 0, 0,  -1, 0, 0,  -1, 0, 0,  -1, 0, 0,
+     0, 1, 0,   0, 1, 0,   0, 1, 0,   0, 1, 0,
+     0,-1, 0,   0,-1, 0,   0,-1, 0,   0,-1, 0,
+     0, 0, 1,   0, 0, 1,   0, 0, 1,   0, 0, 1,
+     0, 0,-1,   0, 0,-1,   0, 0,-1,   0, 0,-1,
+  ])
+
   const indices = new Uint16Array([
-    0,1,2, 0,2,3,  4,5,6, 4,6,7,  8,9,10, 8,10,11,
-    12,13,14, 12,14,15,  16,17,18, 16,18,19,  20,21,22, 20,22,23,
+    0, 1, 2, 0, 2, 3,
+    4, 5, 6, 4, 6, 7,
+    8, 9, 10, 8, 10, 11,
+    12, 13, 14, 12, 14, 15,
+    16, 17, 18, 16, 18, 19,
+    20, 21, 22, 20, 22, 23,
   ])
-  return { vertices, indices }
-}
 
-// --- Minimal mat4 math (column-major) ---
+  return { positions, normals, indices }
+}
 
 function mat4Perspective(out: Float32Array, fov: number, aspect: number, near: number, far: number) {
   const f = 1 / Math.tan(fov / 2)
@@ -87,20 +81,20 @@ function mat4Perspective(out: Float32Array, fov: number, aspect: number, near: n
   out[12] = 0; out[13] = 0; out[14] = near * far * nf; out[15] = 0
 }
 
-function mat4LookAt(out: Float32Array, ex: number, ey: number, ez: number, cx: number, cy: number, cz: number) {
-  let fx = cx - ex, fy = cy - ey, fz = cz - ez
-  let il = 1 / Math.sqrt(fx * fx + fy * fy + fz * fz)
-  fx *= il; fy *= il; fz *= il
-  let rx = fz, rz = -fx
-  il = 1 / Math.sqrt(rx * rx + rz * rz)
-  rx *= il; rz *= il
-  const ux = -fy * rz, uy = rz * fx - rx * fz, uz = rx * fy
-  out[0] = rx;  out[1] = ux;  out[2] = -fx; out[3] = 0
-  out[4] = 0;   out[5] = uy;  out[6] = -fy; out[7] = 0
-  out[8] = rz;  out[9] = uz;  out[10] = -fz; out[11] = 0
-  out[12] = -(rx * ex + rz * ez)
-  out[13] = -(ux * ex + uy * ey + uz * ez)
-  out[14] = fx * ex + fy * ey + fz * ez
+function mat4LookAt(out: Float32Array, eye: number[], center: number[], up: number[]) {
+  let fx = center[0] - eye[0], fy = center[1] - eye[1], fz = center[2] - eye[2]
+  let len = 1 / Math.sqrt(fx * fx + fy * fy + fz * fz)
+  fx *= len; fy *= len; fz *= len
+  let rx = fy * up[2] - fz * up[1], ry = fz * up[0] - fx * up[2], rz = fx * up[1] - fy * up[0]
+  len = 1 / Math.sqrt(rx * rx + ry * ry + rz * rz)
+  rx *= len; ry *= len; rz *= len
+  const sx = ry * fz - rz * fy, sy = rz * fx - rx * fz, sz = rx * fy - ry * fx
+  out[0] = rx; out[1] = sx; out[2] = -fx; out[3] = 0
+  out[4] = ry; out[5] = sy; out[6] = -fy; out[7] = 0
+  out[8] = rz; out[9] = sz; out[10] = -fz; out[11] = 0
+  out[12] = -(rx * eye[0] + ry * eye[1] + rz * eye[2])
+  out[13] = -(sx * eye[0] + sy * eye[1] + sz * eye[2])
+  out[14] = fx * eye[0] + fy * eye[1] + fz * eye[2]
   out[15] = 1
 }
 
@@ -114,88 +108,127 @@ function mat4Mul(out: Float32Array, a: Float32Array, b: Float32Array) {
   }
 }
 
-function mat4RotYXTranslation(out: Float32Array, rx: number, ry: number, tx: number, ty: number, tz: number) {
-  const sx = Math.sin(rx), cx = Math.cos(rx)
-  const sy = Math.sin(ry), cy = Math.cos(ry)
-  out[0] = cy;      out[1] = 0;   out[2] = -sy;     out[3] = 0
-  out[4] = sy * sx; out[5] = cx;  out[6] = cy * sx;  out[7] = 0
-  out[8] = sy * cx; out[9] = -sx; out[10] = cy * cx; out[11] = 0
-  out[12] = tx;     out[13] = ty; out[14] = tz;      out[15] = 1
+class BufferGeometry {
+  readonly vertexBuffer: GPUBuffer
+  readonly indexBuffer: GPUBuffer
+  readonly indexCount: number
+
+  constructor(device: GPUDevice, data: BufferGeometryData) {
+    const vertexCount = data.positions.length / 3
+    const interleaved = new Float32Array(vertexCount * 6)
+    for (let i = 0; i < vertexCount; i++) {
+      interleaved[i * 6] = data.positions[i * 3]
+      interleaved[i * 6 + 1] = data.positions[i * 3 + 1]
+      interleaved[i * 6 + 2] = data.positions[i * 3 + 2]
+      interleaved[i * 6 + 3] = data.normals[i * 3]
+      interleaved[i * 6 + 4] = data.normals[i * 3 + 1]
+      interleaved[i * 6 + 5] = data.normals[i * 3 + 2]
+    }
+
+    this.indexCount = data.indices.length
+    this.vertexBuffer = device.createBuffer({
+      size: interleaved.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    })
+    device.queue.writeBuffer(this.vertexBuffer, 0, interleaved)
+
+    this.indexBuffer = device.createBuffer({
+      size: data.indices.byteLength,
+      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+    })
+    device.queue.writeBuffer(this.indexBuffer, 0, data.indices)
+  }
+
+  destroy() {
+    this.vertexBuffer.destroy()
+    this.indexBuffer.destroy()
+  }
 }
 
-// --- Constants ---
+class LambertMaterial {
+  readonly color: [number, number, number]
 
-const FLOATS_PER_MESH = 20 // mat4 (16) + color (4)
-const INITIAL_CAPACITY = 1000
-
-// --- Mesh handle: views into the GPU data buffer ---
-
-interface MeshHandle {
-  modelMatrix: Float32Array // 16-float subarray
-  color: Float32Array       // 4-float subarray
+  constructor(color: [number, number, number]) {
+    this.color = color
+  }
 }
 
-// --- Utility ---
+class Mesh {
+  x = 0; y = 0; z = 0
+  rx = 0; ry = 0; rz = 0
+  sx = 1; sy = 1; sz = 1
+  rxSpeed = 0; rySpeed = 0; rzSpeed = 0
 
-function hslToRgb(h: number, s: number, l: number): [number, number, number] {
-  const c = (1 - Math.abs(2 * l - 1)) * s
-  const x = c * (1 - Math.abs(((h * 6) % 2) - 1))
-  const m = l - c * 0.5
-  let r = 0, g = 0, b = 0
-  const sector = (h * 6) | 0
-  if (sector === 0) { r = c; g = x }
-  else if (sector === 1) { r = x; g = c }
-  else if (sector === 2) { g = c; b = x }
-  else if (sector === 3) { g = x; b = c }
-  else if (sector === 4) { r = x; b = c }
-  else { r = c; b = x }
-  return [r + m, g + m, b + m]
+  constructor(
+    readonly geometry: BufferGeometry,
+    readonly material: LambertMaterial,
+  ) {}
+
+  writeObjectData(target: Float32Array, offset: number) {
+    const cosX = Math.cos(this.rx), sinX = Math.sin(this.rx)
+    const cosY = Math.cos(this.ry), sinY = Math.sin(this.ry)
+    const cosZ = Math.cos(this.rz), sinZ = Math.sin(this.rz)
+
+    target[offset] = (cosZ * cosY) * this.sx
+    target[offset + 1] = (sinZ * cosY) * this.sx
+    target[offset + 2] = (-sinY) * this.sx
+    target[offset + 3] = 0
+    target[offset + 4] = (cosZ * sinY * sinX - sinZ * cosX) * this.sy
+    target[offset + 5] = (sinZ * sinY * sinX + cosZ * cosX) * this.sy
+    target[offset + 6] = (cosY * sinX) * this.sy
+    target[offset + 7] = 0
+    target[offset + 8] = (cosZ * sinY * cosX + sinZ * sinX) * this.sz
+    target[offset + 9] = (sinZ * sinY * cosX - cosZ * sinX) * this.sz
+    target[offset + 10] = (cosY * cosX) * this.sz
+    target[offset + 11] = 0
+    target[offset + 12] = this.x
+    target[offset + 13] = this.y
+    target[offset + 14] = this.z
+    target[offset + 15] = 1
+    target[offset + 16] = this.material.color[0]
+    target[offset + 17] = this.material.color[1]
+    target[offset + 18] = this.material.color[2]
+    target[offset + 19] = 1
+  }
 }
 
-// --- Engine ---
+const INITIAL_CAPACITY = 1024
+const OBJECT_FLOATS = 20
+const SCENE_FLOATS = 28
 
 export class ExperimentBAdapter implements EngineAdapter {
   private device!: GPUDevice
   private context!: GPUCanvasContext
   private pipeline!: GPURenderPipeline
   private depthTexture!: GPUTexture
-  private vertBuf!: GPUBuffer
-  private idxBuf!: GPUBuffer
-  private indexCount = 0
-  private sceneBuf!: GPUBuffer
-  private instanceBuf!: GPUBuffer
-  private bindGroupLayout!: GPUBindGroupLayout
-  private bindGroup!: GPUBindGroup
-
-  private meshes: MeshHandle[] = []
-  private meshCount = 0
-  private gpuData = new Float32Array(0)
-  private instanceBufSize = 0
-  private sceneData = new Float32Array(28) // viewProj(16) + lightDir(4) + ambient(4) + lightCol(4)
+  private depthW = 0
+  private depthH = 0
+  private sceneBuffer!: GPUBuffer
+  private objectBuffer!: GPUBuffer
+  private sceneBindGroup!: GPUBindGroup
+  private objectBindGroup!: GPUBindGroup
+  private objectLayout!: GPUBindGroupLayout
 
   private canvas!: HTMLCanvasElement
-  private vpMatrix = new Float32Array(16)
+  private useCase: UseCase = 'boxes'
+  private boxGeometry: BufferGeometry | null = null
+  private meshes: Mesh[] = []
+  private capacity = INITIAL_CAPACITY
+  private objectStride = 256
+  private objectFloatStride = 64
+  private objectStaging = new Float32Array(INITIAL_CAPACITY * 64)
+  private sceneData = new Float32Array(SCENE_FLOATS)
+
   private viewMatrix = new Float32Array(16)
   private projMatrix = new Float32Array(16)
+  private vpMatrix = new Float32Array(16)
 
-  // Orbit camera
   private camTheta = 0
   private camPhi = Math.acos(40 / 72)
   private camDist = 72
   private dragging = false
   private lastMX = 0
   private lastMY = 0
-
-  private useCase: UseCase = 'boxes'
-  private depthW = 0
-  private depthH = 0
-
-  // Benchmark-specific animation state
-  private animStates: Array<{
-    x: number; y: number; z: number
-    rx: number; ry: number
-    rxSpeed: number; rySpeed: number
-  }> = []
 
   async init(canvas: HTMLCanvasElement, backend: BackendType, useCase: UseCase) {
     if (backend !== 'webgpu') throw new Error('Experiment B supports WebGPU only')
@@ -205,12 +238,7 @@ export class ExperimentBAdapter implements EngineAdapter {
     if (!navigator.gpu) throw new Error('WebGPU not supported')
     const gpuAdapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })
     if (!gpuAdapter) throw new Error('No WebGPU adapter found')
-    this.device = await gpuAdapter.requestDevice({
-      requiredLimits: {
-        maxStorageBufferBindingSize: gpuAdapter.limits.maxStorageBufferBindingSize,
-        maxBufferSize: gpuAdapter.limits.maxBufferSize,
-      },
-    }) as GPUDevice
+    this.device = await gpuAdapter.requestDevice() as GPUDevice
 
     this.context = canvas.getContext('webgpu')!
     const format = navigator.gpu.getPreferredCanvasFormat()
@@ -221,36 +249,51 @@ export class ExperimentBAdapter implements EngineAdapter {
 
     this.context.configure({ device: this.device, format, alphaMode: 'premultiplied' })
 
-    // Scene uniform (128 bytes, rounded up from 112)
-    this.sceneBuf = this.device.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+    const storageAlign = this.device.limits.minStorageBufferOffsetAlignment
+    this.objectStride = Math.ceil((OBJECT_FLOATS * 4) / storageAlign) * storageAlign
+    this.objectFloatStride = this.objectStride / 4
+    this.objectStaging = new Float32Array(this.capacity * this.objectFloatStride)
 
-    // Lighting constants
-    const ldx = 0.5, ldy = 1.0, ldz = 0.3
-    const ldLen = 1 / Math.sqrt(ldx * ldx + ldy * ldy + ldz * ldz)
-    this.sceneData[16] = ldx * ldLen; this.sceneData[17] = ldy * ldLen; this.sceneData[18] = ldz * ldLen; this.sceneData[19] = 0
-    this.sceneData[20] = 0.15; this.sceneData[21] = 0.15; this.sceneData[22] = 0.18; this.sceneData[23] = 0 // ambient
-    this.sceneData[24] = 1.0; this.sceneData[25] = 0.95; this.sceneData[26] = 0.9; this.sceneData[27] = 0 // light color
-
-    // Initial instance storage buffer
-    this.instanceBufSize = INITIAL_CAPACITY * FLOATS_PER_MESH * 4
-    this.instanceBuf = this.device.createBuffer({
-      size: this.instanceBufSize,
+    this.sceneBuffer = this.device.createBuffer({
+      size: 128,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    })
+    this.objectBuffer = this.device.createBuffer({
+      size: this.capacity * this.objectStride,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     })
 
-    // Pipeline (vertex layout: stride=24, pos float32x3 + normal float32x3)
-    const shaderModule = this.device.createShaderModule({ code: SHADER })
-    this.bindGroupLayout = this.device.createBindGroupLayout({
-      entries: [
-        { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
-        { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
-      ],
+    this.sceneData[16] = 0.5
+    this.sceneData[17] = 1.0
+    this.sceneData[18] = 0.3
+    this.sceneData[20] = 0.18
+    this.sceneData[21] = 0.18
+    this.sceneData[22] = 0.2
+    this.sceneData[24] = 1.0
+    this.sceneData[25] = 0.95
+    this.sceneData[26] = 0.9
+
+    const sceneLayout = this.device.createBindGroupLayout({
+      entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }],
+    })
+    this.objectLayout = this.device.createBindGroupLayout({
+      entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage', hasDynamicOffset: true } }],
     })
 
+    this.sceneBindGroup = this.device.createBindGroup({
+      layout: sceneLayout,
+      entries: [{ binding: 0, resource: { buffer: this.sceneBuffer } }],
+    })
+    this.objectBindGroup = this.device.createBindGroup({
+      layout: this.objectLayout,
+      entries: [{ binding: 0, resource: { buffer: this.objectBuffer, size: OBJECT_FLOATS * 4 } }],
+    })
+
+    const shader = this.device.createShaderModule({ code: SHADER })
     this.pipeline = this.device.createRenderPipeline({
-      layout: this.device.createPipelineLayout({ bindGroupLayouts: [this.bindGroupLayout] }),
+      layout: this.device.createPipelineLayout({ bindGroupLayouts: [sceneLayout, this.objectLayout] }),
       vertex: {
-        module: shaderModule,
+        module: shader,
         entryPoint: 'vs',
         buffers: [{
           arrayStride: 24,
@@ -260,30 +303,22 @@ export class ExperimentBAdapter implements EngineAdapter {
           ],
         }],
       },
-      fragment: { module: shaderModule, entryPoint: 'fs', targets: [{ format }] },
+      fragment: {
+        module: shader,
+        entryPoint: 'fs',
+        targets: [{ format }],
+      },
       primitive: { topology: 'triangle-list', cullMode: 'back' },
       depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
     })
 
-    this.rebuildBindGroup()
     this.ensureDepthTexture()
 
-    // Orbit controls
     canvas.addEventListener('pointerdown', this.onPointerDown)
     canvas.addEventListener('pointermove', this.onPointerMove)
     canvas.addEventListener('pointerup', this.onPointerUp)
     canvas.addEventListener('wheel', this.onWheel, { passive: true })
     window.addEventListener('resize', this.onResize)
-  }
-
-  private rebuildBindGroup() {
-    this.bindGroup = this.device.createBindGroup({
-      layout: this.bindGroupLayout,
-      entries: [
-        { binding: 0, resource: { buffer: this.sceneBuf } },
-        { binding: 1, resource: { buffer: this.instanceBuf } },
-      ],
-    })
   }
 
   private ensureDepthTexture() {
@@ -300,7 +335,26 @@ export class ExperimentBAdapter implements EngineAdapter {
     })
   }
 
-  // --- Orbit controls ---
+  private ensureCapacity(count: number) {
+    if (count <= this.capacity) return
+    this.capacity = count
+    this.objectStaging = new Float32Array(count * this.objectFloatStride)
+    this.objectBuffer.destroy()
+    this.objectBuffer = this.device.createBuffer({
+      size: count * this.objectStride,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    })
+    this.objectBindGroup = this.device.createBindGroup({
+      layout: this.objectLayout,
+      entries: [{ binding: 0, resource: { buffer: this.objectBuffer, size: OBJECT_FLOATS * 4 } }],
+    })
+  }
+
+  private destroyMesh(mesh: Mesh) {
+    if (mesh.geometry !== this.boxGeometry) {
+      mesh.geometry.destroy()
+    }
+  }
 
   private onPointerDown = (e: PointerEvent) => {
     this.dragging = true
@@ -319,7 +373,9 @@ export class ExperimentBAdapter implements EngineAdapter {
     this.camPhi = Math.max(0.05, Math.min(Math.PI - 0.05, this.camPhi + dy * 0.005))
   }
 
-  private onPointerUp = () => { this.dragging = false }
+  private onPointerUp = () => {
+    this.dragging = false
+  }
 
   private onWheel = (e: WheelEvent) => {
     this.camDist = Math.max(5, Math.min(300, this.camDist + e.deltaY * 0.05))
@@ -332,141 +388,82 @@ export class ExperimentBAdapter implements EngineAdapter {
     this.ensureDepthTexture()
   }
 
-  // --- General-purpose: geometry ---
-
-  setGeometry(vertices: Float32Array, indices: Uint16Array) {
-    if (this.vertBuf) this.vertBuf.destroy()
-    if (this.idxBuf) this.idxBuf.destroy()
-    this.vertBuf = this.device.createBuffer({
-      size: vertices.byteLength,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-    })
-    this.device.queue.writeBuffer(this.vertBuf, 0, vertices)
-    this.idxBuf = this.device.createBuffer({
-      size: indices.byteLength,
-      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
-    })
-    this.device.queue.writeBuffer(this.idxBuf, 0, indices)
-    this.indexCount = indices.length
-  }
-
-  // --- General-purpose: mesh capacity ---
-
-  private ensureCapacity(count: number) {
-    // Resize CPU data array
-    if (count * FLOATS_PER_MESH > this.gpuData.length) {
-      const newData = new Float32Array(count * FLOATS_PER_MESH)
-      newData.set(this.gpuData)
-      this.gpuData = newData
-      // Rebuild mesh handle views into new buffer
-      for (let i = 0; i < this.meshes.length; i++) {
-        const o = i * FLOATS_PER_MESH
-        this.meshes[i].modelMatrix = newData.subarray(o, o + 16)
-        this.meshes[i].color = newData.subarray(o + 16, o + 20)
-      }
-    }
-
-    // Resize GPU storage buffer
-    const needed = count * FLOATS_PER_MESH * 4
-    if (needed > this.instanceBufSize) {
-      this.instanceBuf.destroy()
-      this.instanceBufSize = needed
-      this.instanceBuf = this.device.createBuffer({
-        size: needed,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      })
-      this.rebuildBindGroup()
-    }
-  }
-
-  // --- EngineAdapter interface ---
-
   setMeshCount(count: number) {
-    if (this.useCase !== 'boxes') return
-
-    // Set box geometry on first call
-    if (!this.indexCount) {
-      const { vertices, indices } = createBoxGeometry()
-      this.setGeometry(vertices, indices)
-    }
-
+    if (this.useCase !== 'boxes' && this.useCase !== 'unique-tetrahedra') return
     this.ensureCapacity(count)
 
-    const spread = 50
-    while (this.meshes.length < count) {
-      const i = this.meshes.length
-      const total = Math.max(count, 1)
-      const o = i * FLOATS_PER_MESH
-      const handle: MeshHandle = {
-        modelMatrix: this.gpuData.subarray(o, o + 16),
-        color: this.gpuData.subarray(o + 16, o + 20),
+    if (this.useCase === 'boxes') {
+      if (!this.boxGeometry) {
+        this.boxGeometry = new BufferGeometry(this.device, createBoxGeometryData())
       }
-      const [r, g, b] = hslToRgb((i / total + Math.random() * 0.05) % 1, 0.7, 0.55)
-      handle.color[0] = r
-      handle.color[1] = g
-      handle.color[2] = b
-      handle.color[3] = 1
-      this.meshes.push(handle)
 
-      // Benchmark-specific: box animation state
-      this.animStates.push({
-        x: (Math.random() - 0.5) * spread,
-        y: (Math.random() - 0.5) * spread,
-        z: (Math.random() - 0.5) * spread,
-        rx: Math.random() * Math.PI * 2,
-        ry: Math.random() * Math.PI * 2,
-        rxSpeed: 0.5 + Math.random() * 2,
-        rySpeed: 0.5 + Math.random() * 2,
-      })
+      const spread = 50
+      while (this.meshes.length < count) {
+        const mesh = new Mesh(
+          this.boxGeometry,
+          new LambertMaterial([Math.random(), Math.random(), Math.random()]),
+        )
+        mesh.x = (Math.random() - 0.5) * spread
+        mesh.y = (Math.random() - 0.5) * spread
+        mesh.z = (Math.random() - 0.5) * spread
+        mesh.rxSpeed = 1.0
+        mesh.rySpeed = 0.7
+        this.meshes.push(mesh)
+      }
+    } else {
+      while (this.meshes.length < count) {
+        const spec = createUniqueTetrahedronSpec(this.meshes.length)
+        const mesh = new Mesh(
+          new BufferGeometry(this.device, spec.geometry),
+          new LambertMaterial(spec.material.color),
+        )
+        mesh.x = spec.position[0]
+        mesh.y = spec.position[1]
+        mesh.z = spec.position[2]
+        mesh.rx = spec.rotation[0]
+        mesh.ry = spec.rotation[1]
+        mesh.rz = spec.rotation[2]
+        mesh.rxSpeed = spec.rotationSpeed[0]
+        mesh.rySpeed = spec.rotationSpeed[1]
+        mesh.rzSpeed = spec.rotationSpeed[2]
+        this.meshes.push(mesh)
+      }
     }
 
-    if (this.meshes.length > count) {
-      this.meshes.length = count
-      this.animStates.length = count
+    while (this.meshes.length > count) {
+      this.destroyMesh(this.meshes.pop()!)
     }
-
-    this.meshCount = count
   }
 
   setShadows(_enabled: boolean) {
-    // Shadows not implemented in this minimal engine
+    // Shadows not implemented in this minimal experiment.
   }
 
   render(dt: number) {
-    if (this.useCase !== 'boxes' || this.meshCount === 0) return
+    if ((this.useCase !== 'boxes' && this.useCase !== 'unique-tetrahedra') || this.meshes.length === 0) return
 
     this.onResize()
 
-    const w = this.canvas.width
-    const h = this.canvas.height
-    const n = this.meshCount
-
-    // Camera
     const eye = [
       this.camDist * Math.sin(this.camPhi) * Math.sin(this.camTheta),
       this.camDist * Math.cos(this.camPhi),
       this.camDist * Math.sin(this.camPhi) * Math.cos(this.camTheta),
     ]
-    mat4Perspective(this.projMatrix, Math.PI / 3, w / h, 0.1, 1000)
-    mat4LookAt(this.viewMatrix, eye[0], eye[1], eye[2], 0, 0, 0)
+    mat4Perspective(this.projMatrix, Math.PI / 3, this.canvas.width / this.canvas.height, 0.1, 1000)
+    mat4LookAt(this.viewMatrix, eye, [0, 0, 0], [0, 1, 0])
     mat4Mul(this.vpMatrix, this.projMatrix, this.viewMatrix)
-
-    // Write viewProj into scene data
     this.sceneData.set(this.vpMatrix, 0)
-    this.device.queue.writeBuffer(this.sceneBuf, 0, this.sceneData)
+    this.device.queue.writeBuffer(this.sceneBuffer, 0, this.sceneData)
 
-    // Benchmark-specific: animate boxes (writes directly into gpuData via mesh handles)
-    for (let i = 0; i < n; i++) {
-      const s = this.animStates[i]
-      s.rx += s.rxSpeed * dt
-      s.ry += s.rySpeed * dt
-      mat4RotYXTranslation(this.meshes[i].modelMatrix, s.rx, s.ry, s.x, s.y, s.z)
+    for (let i = 0; i < this.meshes.length; i++) {
+      const mesh = this.meshes[i]
+      mesh.rx += mesh.rxSpeed * dt
+      mesh.ry += mesh.rySpeed * dt
+      mesh.rz += mesh.rzSpeed * dt
+      mesh.writeObjectData(this.objectStaging, i * this.objectFloatStride)
     }
+    this.device.queue.writeBuffer(this.objectBuffer, 0, this.objectStaging.buffer, 0, this.meshes.length * this.objectStride)
 
-    // General: upload all mesh data (single writeBuffer for all instances)
-    this.device.queue.writeBuffer(this.instanceBuf, 0, this.gpuData.buffer, 0, n * FLOATS_PER_MESH * 4)
-
-    // General: encode render pass
     const encoder = this.device.createCommandEncoder()
     const pass = encoder.beginRenderPass({
       colorAttachments: [{
@@ -477,19 +474,25 @@ export class ExperimentBAdapter implements EngineAdapter {
       }],
       depthStencilAttachment: {
         view: this.depthTexture.createView(),
-        depthClearValue: 1.0,
+        depthClearValue: 1,
         depthLoadOp: 'clear',
         depthStoreOp: 'store',
       },
     })
 
     pass.setPipeline(this.pipeline)
-    pass.setBindGroup(0, this.bindGroup)
-    pass.setVertexBuffer(0, this.vertBuf)
-    pass.setIndexBuffer(this.idxBuf, 'uint16')
+    pass.setBindGroup(0, this.sceneBindGroup)
 
-    for (let i = 0; i < n; i++) {
-      pass.drawIndexed(this.indexCount, 1, 0, 0, i)
+    let currentGeometry: BufferGeometry | null = null
+    for (let i = 0; i < this.meshes.length; i++) {
+      const geometry = this.meshes[i].geometry
+      if (geometry !== currentGeometry) {
+        currentGeometry = geometry
+        pass.setVertexBuffer(0, geometry.vertexBuffer)
+        pass.setIndexBuffer(geometry.indexBuffer, 'uint16')
+      }
+      pass.setBindGroup(1, this.objectBindGroup, [i * this.objectStride])
+      pass.drawIndexed(geometry.indexCount)
     }
 
     pass.end()
@@ -502,14 +505,18 @@ export class ExperimentBAdapter implements EngineAdapter {
     this.canvas.removeEventListener('pointerup', this.onPointerUp)
     this.canvas.removeEventListener('wheel', this.onWheel)
     window.removeEventListener('resize', this.onResize)
-    this.vertBuf?.destroy()
-    this.idxBuf?.destroy()
-    this.sceneBuf?.destroy()
-    this.instanceBuf?.destroy()
+
+    for (const mesh of this.meshes) {
+      this.destroyMesh(mesh)
+    }
+    this.boxGeometry?.destroy()
+    this.boxGeometry = null
+    this.meshes = []
+
+    this.sceneBuffer?.destroy()
+    this.objectBuffer?.destroy()
     this.depthTexture?.destroy()
     this.device?.destroy()
-    this.meshes = []
-    this.animStates = []
   }
 
   getInfo() {

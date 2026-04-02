@@ -1,6 +1,6 @@
 export type EngineName = 'threejs' | 'playcanvas' | 'babylonjs' | 'voidcore' | 'experiment-a' | 'experiment-b' | 'experiment-c'
 export type BackendType = 'webgl' | 'webgpu'
-export type UseCase = 'boxes' | 'skinned-mesh'
+export type UseCase = 'boxes' | 'skinned-mesh' | 'unique-tetrahedra'
 
 export interface BenchmarkParams {
   engine: EngineName

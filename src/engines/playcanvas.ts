@@ -1,4 +1,5 @@
 import type { EngineAdapter, BackendType, UseCase } from '../types'
+import { createUniqueTetrahedronSpec, type BufferGeometryData } from '../benchmark-scene'
 import * as pc from 'playcanvas'
 
 interface SkinnedCharacter {
@@ -6,9 +7,19 @@ interface SkinnedCharacter {
   stateGraphAsset?: pc.Asset
 }
 
+interface AnimatedStaticEntity {
+  entity: pc.Entity
+  material: pc.StandardMaterial
+  mesh: pc.Mesh | null
+  rotationSpeed: [number, number, number]
+}
+
+const RAD_TO_DEG = 180 / Math.PI
+
 export class PlayCanvasAdapter implements EngineAdapter {
   private app!: pc.AppBase
-  private cubes: pc.Entity[] = []
+  private boxes: AnimatedStaticEntity[] = []
+  private tetrahedra: AnimatedStaticEntity[] = []
   private characters: SkinnedCharacter[] = []
   private cameraEntity!: pc.Entity
   private dirLightEntity!: pc.Entity
@@ -68,7 +79,6 @@ export class PlayCanvasAdapter implements EngineAdapter {
     app.setCanvasFillMode(pc.FILLMODE_FILL_WINDOW)
     app.setCanvasResolution(pc.RESOLUTION_AUTO)
 
-    // Camera
     this.cameraEntity = new pc.Entity('camera')
     this.cameraEntity.addComponent('camera', {
       clearColor: new pc.Color(0, 0, 0, 1),
@@ -78,16 +88,16 @@ export class PlayCanvasAdapter implements EngineAdapter {
     })
     app.root.addChild(this.cameraEntity)
 
-    if (useCase === 'boxes') {
-      this.orbitDistance = 80
-      this.orbitPitch = 60
-      this.orbitYaw = -45
-      this.orbitTarget.set(0, 0, 0)
-    } else {
+    if (useCase === 'skinned-mesh') {
       this.orbitDistance = 50
       this.orbitPitch = 60
       this.orbitYaw = -45
       this.orbitTarget.set(0, 5, 0)
+    } else {
+      this.orbitDistance = 80
+      this.orbitPitch = 60
+      this.orbitYaw = -45
+      this.orbitTarget.set(0, 0, 0)
     }
     this.updateOrbitCamera()
 
@@ -96,10 +106,8 @@ export class PlayCanvasAdapter implements EngineAdapter {
     canvas.addEventListener('pointerup', this.onPointerUp)
     canvas.addEventListener('wheel', this.onWheel)
 
-    // Ambient light via scene ambient
     app.scene.ambientLight = new pc.Color(0.25, 0.25, 0.25)
 
-    // Directional light
     this.dirLightEntity = new pc.Entity('dirLight')
     this.dirLightEntity.addComponent('light', {
       type: 'directional',
@@ -114,7 +122,6 @@ export class PlayCanvasAdapter implements EngineAdapter {
     this.dirLightEntity.setEulerAngles(45, 30, 0)
     app.root.addChild(this.dirLightEntity)
 
-    // Container for meshes
     this.root = new pc.Entity('meshRoot')
     app.root.addChild(this.root)
 
@@ -127,6 +134,21 @@ export class PlayCanvasAdapter implements EngineAdapter {
     window.addEventListener('resize', this.onResize)
   }
 
+  private createCustomMesh(data: BufferGeometryData) {
+    const mesh = new pc.Mesh(this.app.graphicsDevice)
+    mesh.setPositions(data.positions)
+    mesh.setNormals(data.normals)
+    mesh.setIndices(data.indices)
+    mesh.update()
+    return mesh
+  }
+
+  private destroyStaticEntity(entry: AnimatedStaticEntity) {
+    entry.entity.destroy()
+    entry.mesh?.destroy()
+    entry.material.destroy()
+  }
+
   private async loadModel() {
     return new Promise<void>((resolve, reject) => {
       this.containerAsset = new pc.Asset('michelle', 'container', {
@@ -135,7 +157,6 @@ export class PlayCanvasAdapter implements EngineAdapter {
       this.containerAsset.on('load', () => {
         this.containerResource = this.containerAsset!.resource
 
-        // Extract animation info
         const animations = this.containerResource.animations
         if (animations) {
           for (let i = 0; i < animations.length; i++) {
@@ -197,20 +218,21 @@ export class PlayCanvasAdapter implements EngineAdapter {
   setMeshCount(count: number) {
     if (this.useCase === 'boxes') {
       this.setBoxCount(count)
+    } else if (this.useCase === 'unique-tetrahedra') {
+      this.setUniqueTetrahedronCount(count)
     } else {
       this.setCharacterCount(count)
     }
   }
 
   private setBoxCount(count: number) {
-    while (this.cubes.length > count) {
-      const cube = this.cubes.pop()!
-      cube.destroy()
+    while (this.boxes.length > count) {
+      this.destroyStaticEntity(this.boxes.pop()!)
     }
 
     const spread = 50
-    while (this.cubes.length < count) {
-      const entity = new pc.Entity(`cube_${this.cubes.length}`)
+    while (this.boxes.length < count) {
+      const entity = new pc.Entity(`cube_${this.boxes.length}`)
 
       const material = new pc.StandardMaterial()
       material.diffuse = new pc.Color(Math.random(), Math.random(), Math.random())
@@ -232,20 +254,63 @@ export class PlayCanvasAdapter implements EngineAdapter {
       )
 
       this.root.addChild(entity)
-      this.cubes.push(entity)
+      this.boxes.push({
+        entity,
+        material,
+        mesh: null,
+        rotationSpeed: [1.0, 0.7, 0],
+      })
+    }
+  }
+
+  private setUniqueTetrahedronCount(count: number) {
+    while (this.tetrahedra.length > count) {
+      this.destroyStaticEntity(this.tetrahedra.pop()!)
+    }
+
+    while (this.tetrahedra.length < count) {
+      const index = this.tetrahedra.length
+      const spec = createUniqueTetrahedronSpec(index)
+      const entity = new pc.Entity(`tetra_${index}`)
+      const material = new pc.StandardMaterial()
+      material.diffuse = new pc.Color(...spec.material.color)
+      material.specular = new pc.Color(0, 0, 0)
+      material.gloss = 0
+      material.update()
+
+      const mesh = this.createCustomMesh(spec.geometry)
+      const meshInstance = new pc.MeshInstance(mesh, material)
+
+      entity.addComponent('render', {
+        meshInstances: [meshInstance],
+        castShadows: this.shadowsEnabled,
+        receiveShadows: this.shadowsEnabled,
+      })
+      entity.setPosition(...spec.position)
+      entity.setEulerAngles(
+        spec.rotation[0] * RAD_TO_DEG,
+        spec.rotation[1] * RAD_TO_DEG,
+        spec.rotation[2] * RAD_TO_DEG,
+      )
+
+      this.root.addChild(entity)
+      this.tetrahedra.push({
+        entity,
+        material,
+        mesh,
+        rotationSpeed: spec.rotationSpeed,
+      })
     }
   }
 
   private setCharacterCount(count: number) {
     if (!this.containerResource) return
 
-    // Remove excess characters
     while (this.characters.length > count) {
       const char = this.characters.pop()!
       char.entity.destroy()
     }
 
-    // Add missing characters
     const cols = Math.ceil(Math.sqrt(count))
     const spacing = 2
     const numAnims = this.animClipNames.length
@@ -255,7 +320,6 @@ export class PlayCanvasAdapter implements EngineAdapter {
       const entity = this.containerResource.instantiateRenderEntity()
       entity.name = `character_${i}`
 
-      // Grid layout
       const row = Math.floor(i / cols)
       const col = i % cols
       entity.setPosition(
@@ -265,12 +329,9 @@ export class PlayCanvasAdapter implements EngineAdapter {
       )
       entity.setLocalScale(0.01, 0.01, 0.01)
 
-      // Set shadow properties
       this.setEntityShadows(entity, this.shadowsEnabled)
-
       this.root.addChild(entity)
 
-      // Set up animation
       if (numAnims > 0) {
         const animIndex = numAnims > 1 ? i % numAnims : 0
         entity.addComponent('anim', {
@@ -278,7 +339,6 @@ export class PlayCanvasAdapter implements EngineAdapter {
           speed: 1,
         })
 
-        // Create a simple state graph with a single dancing state
         const stateGraphData = {
           layers: [{
             name: 'Base',
@@ -298,13 +358,11 @@ export class PlayCanvasAdapter implements EngineAdapter {
 
         entity.anim!.loadStateGraph(stateGraphData)
 
-        // Assign the animation track to the Dance state
         const animations = this.containerResource.animations
         if (animations && animations[animIndex]) {
           const animTrack = animations[animIndex].resource
           entity.anim!.assignAnimation('Base.Dance', animTrack)
 
-          // Offset the animation time so characters are not in sync
           const duration = this.animClipDurations[animIndex] || 1
           const timeOffset = (i / count) * duration
           const baseLayer = entity.anim!.baseLayer
@@ -329,10 +387,17 @@ export class PlayCanvasAdapter implements EngineAdapter {
   setShadows(enabled: boolean) {
     this.shadowsEnabled = enabled
     this.dirLightEntity.light!.castShadows = enabled
-    for (const cube of this.cubes) {
-      if (cube.render) {
-        cube.render.castShadows = enabled
-        cube.render.receiveShadows = enabled
+
+    for (const box of this.boxes) {
+      if (box.entity.render) {
+        box.entity.render.castShadows = enabled
+        box.entity.render.receiveShadows = enabled
+      }
+    }
+    for (const tetra of this.tetrahedra) {
+      if (tetra.entity.render) {
+        tetra.entity.render.castShadows = enabled
+        tetra.entity.render.receiveShadows = enabled
       }
     }
     for (const char of this.characters) {
@@ -341,13 +406,21 @@ export class PlayCanvasAdapter implements EngineAdapter {
   }
 
   render(dt: number) {
-    if (this.useCase === 'boxes') {
-      const speed = 1.0
-      for (const cube of this.cubes) {
-        cube.rotateLocal(speed * dt * 57.3, speed * dt * 0.7 * 57.3, 0)
+    const staticEntities = this.useCase === 'boxes'
+      ? this.boxes
+      : this.useCase === 'unique-tetrahedra'
+        ? this.tetrahedra
+        : null
+
+    if (staticEntities) {
+      for (const entry of staticEntities) {
+        entry.entity.rotateLocal(
+          entry.rotationSpeed[0] * dt * RAD_TO_DEG,
+          entry.rotationSpeed[1] * dt * RAD_TO_DEG,
+          entry.rotationSpeed[2] * dt * RAD_TO_DEG,
+        )
       }
     }
-    // PlayCanvas handles animation updates internally via the AnimComponent system
   }
 
   dispose() {
@@ -357,13 +430,19 @@ export class PlayCanvasAdapter implements EngineAdapter {
     canvas.removeEventListener('pointerup', this.onPointerUp)
     canvas.removeEventListener('wheel', this.onWheel)
     window.removeEventListener('resize', this.onResize)
-    for (const cube of this.cubes) {
-      cube.destroy()
+
+    for (const box of this.boxes) {
+      this.destroyStaticEntity(box)
+    }
+    for (const tetra of this.tetrahedra) {
+      this.destroyStaticEntity(tetra)
     }
     for (const char of this.characters) {
       char.entity.destroy()
     }
-    this.cubes = []
+
+    this.boxes = []
+    this.tetrahedra = []
     this.characters = []
     this.containerAsset = null
     this.containerResource = null
