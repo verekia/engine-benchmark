@@ -14,6 +14,7 @@ import {
   Object3D,
   Group,
 } from 'three/webgpu'
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js'
 
@@ -28,6 +29,7 @@ export class ThreeAdapter implements EngineAdapter {
   private camera!: PerspectiveCamera
   private cubes: Mesh[] = []
   private characters: SkinnedCharacter[] = []
+  private controls!: OrbitControls
   private dirLight!: DirectionalLight
   private geometry!: BoxGeometry
   private shadowsEnabled = false
@@ -40,7 +42,6 @@ export class ThreeAdapter implements EngineAdapter {
     this.scene = new Scene()
     this.camera = new PerspectiveCamera(60, canvas.width / canvas.height, 0.1, 1000)
     this.camera.position.set(0, 40, 60)
-    this.camera.lookAt(0, 0, 0)
 
     this.renderer = new WebGPURenderer({
       canvas,
@@ -52,6 +53,8 @@ export class ThreeAdapter implements EngineAdapter {
     this.renderer.shadowMap.enabled = false
 
     await this.renderer.init()
+
+    this.controls = new OrbitControls(this.camera, canvas)
 
     const ambient = new AmbientLight(0x404040, 1)
     this.scene.add(ambient)
@@ -81,7 +84,7 @@ export class ThreeAdapter implements EngineAdapter {
 
       // Set up camera for character viewing
       this.camera.position.set(0, 15, 40)
-      this.camera.lookAt(0, 5, 0)
+      this.controls.target.set(0, 5, 0)
     }
 
     window.addEventListener('resize', this.onResize)
@@ -217,6 +220,7 @@ export class ThreeAdapter implements EngineAdapter {
 
   dispose() {
     window.removeEventListener('resize', this.onResize)
+    this.controls.dispose()
     for (const cube of this.cubes) {
       (cube.material as MeshLambertMaterial).dispose()
     }

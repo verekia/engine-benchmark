@@ -230,8 +230,12 @@ export class BabylonAdapter implements EngineAdapter {
         cube.rotation.y += speed * dt * 0.7
       }
     }
-    // Babylon.js handles animation updates automatically via the scene
+    // beginFrame/endFrame are required for WebGPU — they manage command encoder
+    // lifecycle and flush GPU command buffers. Without them, commands accumulate
+    // and the swapchain texture expires before submission.
+    this.engine.beginFrame()
     this.scene.render()
+    this.engine.endFrame()
   }
 
   dispose() {

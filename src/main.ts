@@ -12,7 +12,7 @@ const params = {
   engine: 'threejs' as EngineName,
   backend: 'webgpu' as BackendType,
   useCase: 'boxes' as UseCase,
-  meshCount: 500,
+  meshCount: 1000,
   shadows: false,
 }
 
@@ -110,20 +110,23 @@ gui.domElement.style.right = '0'
 gui.add(params, 'engine', ['threejs', 'playcanvas', 'babylonjs', 'voidcore']).name('Engine').onChange(() => restart())
 gui.add(params, 'backend', ['webgl', 'webgpu']).name('Backend').onChange(() => restart())
 gui.add(params, 'useCase', ['boxes', 'skinned-mesh']).name('Use Case').onChange(() => {
-  // Adjust count range for skinned mesh
   if (params.useCase === 'skinned-mesh') {
-    meshCountCtrl.min(100).max(3000).step(100)
-    if (params.meshCount > 3000) {
-      params.meshCount = 3000
+    meshCountCtrl.options([100, 500, 1000, 2000])
+    if (params.meshCount > 2000) {
+      params.meshCount = 1000
       meshCountCtrl.updateDisplay()
     }
   } else {
-    meshCountCtrl.min(100).max(5000).step(100)
+    meshCountCtrl.options([1000, 2000, 5000, 10000])
+    if (params.meshCount < 1000) {
+      params.meshCount = 1000
+      meshCountCtrl.updateDisplay()
+    }
   }
   restart()
 })
 
-const meshCountCtrl = gui.add(params, 'meshCount', 100, 5000, 100).name('Mesh Count').onChange((v: number) => {
+const meshCountCtrl = gui.add(params, 'meshCount', [1000, 2000, 5000, 10000]).name('Mesh Count').onChange((v: number) => {
   if (currentAdapter) currentAdapter.setMeshCount(v)
 })
 gui.add(params, 'shadows').name('Shadows').onChange((v: boolean) => {

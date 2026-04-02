@@ -10,9 +10,16 @@ export class PlayCanvasAdapter implements EngineAdapter {
   private app!: pc.AppBase
   private cubes: pc.Entity[] = []
   private characters: SkinnedCharacter[] = []
+  private cameraEntity!: pc.Entity
   private dirLightEntity!: pc.Entity
   private shadowsEnabled = false
   private root!: pc.Entity
+  private orbitYaw = -45
+  private orbitPitch = 60
+  private orbitDistance = 80
+  private orbitTarget = new pc.Vec3(0, 0, 0)
+  private pointerDown = false
+  private lastPointer = { x: 0, y: 0 }
   private useCase: UseCase = 'boxes'
   private containerAsset: pc.Asset | null = null
   private containerResource: any = null
@@ -62,20 +69,32 @@ export class PlayCanvasAdapter implements EngineAdapter {
     app.setCanvasResolution(pc.RESOLUTION_AUTO)
 
     // Camera
-    const camera = new pc.Entity('camera')
-    camera.addComponent('camera', {
+    this.cameraEntity = new pc.Entity('camera')
+    this.cameraEntity.addComponent('camera', {
       clearColor: new pc.Color(0, 0, 0, 1),
       farClip: 1000,
       nearClip: 0.1,
       fov: 60,
     })
+    app.root.addChild(this.cameraEntity)
+
     if (useCase === 'boxes') {
-      camera.setPosition(0, 40, 60)
+      this.orbitDistance = 80
+      this.orbitPitch = 60
+      this.orbitYaw = -45
+      this.orbitTarget.set(0, 0, 0)
     } else {
-      camera.setPosition(0, 15, 40)
+      this.orbitDistance = 50
+      this.orbitPitch = 60
+      this.orbitYaw = -45
+      this.orbitTarget.set(0, 5, 0)
     }
-    camera.lookAt(0, 0, 0)
-    app.root.addChild(camera)
+    this.updateOrbitCamera()
+
+    canvas.addEventListener('pointerdown', this.onPointerDown)
+    canvas.addEventListener('pointermove', this.onPointerMove)
+    canvas.addEventListener('pointerup', this.onPointerUp)
+    canvas.addEventListener('wheel', this.onWheel)
 
     // Ambient light via scene ambient
     app.scene.ambientLight = new pc.Color(0.25, 0.25, 0.25)
@@ -133,6 +152,42 @@ export class PlayCanvasAdapter implements EngineAdapter {
       this.app.assets.add(this.containerAsset)
       this.app.assets.load(this.containerAsset)
     })
+  }
+
+  private updateOrbitCamera() {
+    const pitchRad = this.orbitPitch * Math.PI / 180
+    const yawRad = this.orbitYaw * Math.PI / 180
+    const x = this.orbitTarget.x + this.orbitDistance * Math.cos(pitchRad) * Math.sin(yawRad)
+    const y = this.orbitTarget.y + this.orbitDistance * Math.sin(pitchRad)
+    const z = this.orbitTarget.z + this.orbitDistance * Math.cos(pitchRad) * Math.cos(yawRad)
+    this.cameraEntity.setPosition(x, y, z)
+    this.cameraEntity.lookAt(this.orbitTarget)
+  }
+
+  private onPointerDown = (e: PointerEvent) => {
+    this.pointerDown = true
+    this.lastPointer.x = e.clientX
+    this.lastPointer.y = e.clientY
+  }
+
+  private onPointerMove = (e: PointerEvent) => {
+    if (!this.pointerDown) return
+    const dx = e.clientX - this.lastPointer.x
+    const dy = e.clientY - this.lastPointer.y
+    this.lastPointer.x = e.clientX
+    this.lastPointer.y = e.clientY
+    this.orbitYaw -= dx * 0.3
+    this.orbitPitch = Math.max(-89, Math.min(89, this.orbitPitch + dy * 0.3))
+    this.updateOrbitCamera()
+  }
+
+  private onPointerUp = () => {
+    this.pointerDown = false
+  }
+
+  private onWheel = (e: WheelEvent) => {
+    this.orbitDistance = Math.max(2, this.orbitDistance + e.deltaY * 0.05)
+    this.updateOrbitCamera()
   }
 
   private onResize = () => {
@@ -296,6 +351,11 @@ export class PlayCanvasAdapter implements EngineAdapter {
   }
 
   dispose() {
+    const canvas = this.app.graphicsDevice.canvas
+    canvas.removeEventListener('pointerdown', this.onPointerDown)
+    canvas.removeEventListener('pointermove', this.onPointerMove)
+    canvas.removeEventListener('pointerup', this.onPointerUp)
+    canvas.removeEventListener('wheel', this.onWheel)
     window.removeEventListener('resize', this.onResize)
     for (const cube of this.cubes) {
       cube.destroy()
