@@ -38,6 +38,14 @@ async function loadAdapter(engine: EngineName): Promise<EngineAdapter> {
       const { ExperimentAAdapter } = await import('./engines/experiment-a')
       return new ExperimentAAdapter()
     }
+    case 'experiment-b': {
+      const { ExperimentBAdapter } = await import('./engines/experiment-b')
+      return new ExperimentBAdapter()
+    }
+    case 'experiment-c': {
+      const { ExperimentCAdapter } = await import('./engines/experiment-c')
+      return new ExperimentCAdapter()
+    }
   }
 }
 
@@ -111,7 +119,7 @@ gui.domElement.style.position = 'fixed'
 gui.domElement.style.top = '0'
 gui.domElement.style.right = '0'
 
-gui.add(params, 'engine', ['threejs', 'playcanvas', 'babylonjs', 'voidcore', 'experiment-a']).name('Engine').onChange(() => restart())
+gui.add(params, 'engine', ['threejs', 'playcanvas', 'babylonjs', 'voidcore', 'experiment-a', 'experiment-b', 'experiment-c']).name('Engine').onChange(() => restart())
 gui.add(params, 'backend', ['webgl', 'webgpu']).name('Backend').onChange(() => restart())
 gui.add(params, 'useCase', ['boxes', 'skinned-mesh']).name('Use Case').onChange(() => {
   if (params.useCase === 'skinned-mesh') {
@@ -121,7 +129,7 @@ gui.add(params, 'useCase', ['boxes', 'skinned-mesh']).name('Use Case').onChange(
       meshCountCtrl.updateDisplay()
     }
   } else {
-    meshCountCtrl.options([1000, 2000, 5000, 10000])
+    meshCountCtrl.options([1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000])
     if (params.meshCount < 1000) {
       params.meshCount = 1000
       meshCountCtrl.updateDisplay()
@@ -130,7 +138,7 @@ gui.add(params, 'useCase', ['boxes', 'skinned-mesh']).name('Use Case').onChange(
   restart()
 })
 
-const meshCountCtrl = gui.add(params, 'meshCount', [1000, 2000, 5000, 10000]).name('Mesh Count').onChange((v: number) => {
+const meshCountCtrl = gui.add(params, 'meshCount', [1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000]).name('Mesh Count').onChange((v: number) => {
   if (currentAdapter) currentAdapter.setMeshCount(v)
 })
 gui.add(params, 'shadows').name('Shadows').onChange((v: boolean) => {

@@ -4,10 +4,10 @@ import type { EngineAdapter, BackendType, UseCase } from '../types'
 
 const SHADER = /* wgsl */ `
 struct Camera { viewProj: mat4x4f }
-struct Cube { model: mat4x4f, color: vec4f }
+struct Instance { model: mat4x4f, color: vec4f }
 
 @group(0) @binding(0) var<uniform> camera: Camera;
-@group(1) @binding(0) var<uniform> cube: Cube;
+@group(1) @binding(0) var<uniform> instance: Instance;
 
 struct VSOut {
   @builtin(position) pos: vec4f,
@@ -17,9 +17,9 @@ struct VSOut {
 
 @vertex fn vs(@location(0) position: vec3f, @location(1) normal: vec3f) -> VSOut {
   var out: VSOut;
-  out.pos = camera.viewProj * cube.model * vec4f(position, 1.0);
-  out.normal = (cube.model * vec4f(normal, 0.0)).xyz;
-  out.color = cube.color.rgb;
+  out.pos = camera.viewProj * instance.model * vec4f(position, 1.0);
+  out.normal = (instance.model * vec4f(normal, 0.0)).xyz;
+  out.color = instance.color.rgb;
   return out;
 }
 
@@ -32,33 +32,35 @@ struct VSOut {
 }
 `
 
-// --- Cube geometry: 36 vertices, 6 floats each (pos xyz + normal xyz) ---
+// --- Box geometry: 36 vertices, interleaved pos(3) + normal(3) ---
 
 // prettier-ignore
-const CUBE_VERTS = new Float32Array([
-  // +Z face
-  -0.5,-0.5, 0.5,  0, 0, 1,   0.5,-0.5, 0.5,  0, 0, 1,   0.5, 0.5, 0.5,  0, 0, 1,
-  -0.5,-0.5, 0.5,  0, 0, 1,   0.5, 0.5, 0.5,  0, 0, 1,  -0.5, 0.5, 0.5,  0, 0, 1,
-  // -Z face
-   0.5,-0.5,-0.5,  0, 0,-1,  -0.5,-0.5,-0.5,  0, 0,-1,  -0.5, 0.5,-0.5,  0, 0,-1,
-   0.5,-0.5,-0.5,  0, 0,-1,  -0.5, 0.5,-0.5,  0, 0,-1,   0.5, 0.5,-0.5,  0, 0,-1,
-  // +X face
-   0.5,-0.5, 0.5,  1, 0, 0,   0.5,-0.5,-0.5,  1, 0, 0,   0.5, 0.5,-0.5,  1, 0, 0,
-   0.5,-0.5, 0.5,  1, 0, 0,   0.5, 0.5,-0.5,  1, 0, 0,   0.5, 0.5, 0.5,  1, 0, 0,
-  // -X face
-  -0.5,-0.5,-0.5, -1, 0, 0,  -0.5,-0.5, 0.5, -1, 0, 0,  -0.5, 0.5, 0.5, -1, 0, 0,
-  -0.5,-0.5,-0.5, -1, 0, 0,  -0.5, 0.5, 0.5, -1, 0, 0,  -0.5, 0.5,-0.5, -1, 0, 0,
-  // +Y face
-  -0.5, 0.5, 0.5,  0, 1, 0,   0.5, 0.5, 0.5,  0, 1, 0,   0.5, 0.5,-0.5,  0, 1, 0,
-  -0.5, 0.5, 0.5,  0, 1, 0,   0.5, 0.5,-0.5,  0, 1, 0,  -0.5, 0.5,-0.5,  0, 1, 0,
-  // -Y face
-  -0.5,-0.5,-0.5,  0,-1, 0,   0.5,-0.5,-0.5,  0,-1, 0,   0.5,-0.5, 0.5,  0,-1, 0,
-  -0.5,-0.5,-0.5,  0,-1, 0,   0.5,-0.5, 0.5,  0,-1, 0,  -0.5,-0.5, 0.5,  0,-1, 0,
-])
+function createBoxGeometry(): Float32Array {
+  return new Float32Array([
+    // +Z face
+    -0.5,-0.5, 0.5,  0, 0, 1,   0.5,-0.5, 0.5,  0, 0, 1,   0.5, 0.5, 0.5,  0, 0, 1,
+    -0.5,-0.5, 0.5,  0, 0, 1,   0.5, 0.5, 0.5,  0, 0, 1,  -0.5, 0.5, 0.5,  0, 0, 1,
+    // -Z face
+     0.5,-0.5,-0.5,  0, 0,-1,  -0.5,-0.5,-0.5,  0, 0,-1,  -0.5, 0.5,-0.5,  0, 0,-1,
+     0.5,-0.5,-0.5,  0, 0,-1,  -0.5, 0.5,-0.5,  0, 0,-1,   0.5, 0.5,-0.5,  0, 0,-1,
+    // +X face
+     0.5,-0.5, 0.5,  1, 0, 0,   0.5,-0.5,-0.5,  1, 0, 0,   0.5, 0.5,-0.5,  1, 0, 0,
+     0.5,-0.5, 0.5,  1, 0, 0,   0.5, 0.5,-0.5,  1, 0, 0,   0.5, 0.5, 0.5,  1, 0, 0,
+    // -X face
+    -0.5,-0.5,-0.5, -1, 0, 0,  -0.5,-0.5, 0.5, -1, 0, 0,  -0.5, 0.5, 0.5, -1, 0, 0,
+    -0.5,-0.5,-0.5, -1, 0, 0,  -0.5, 0.5, 0.5, -1, 0, 0,  -0.5, 0.5,-0.5, -1, 0, 0,
+    // +Y face
+    -0.5, 0.5, 0.5,  0, 1, 0,   0.5, 0.5, 0.5,  0, 1, 0,   0.5, 0.5,-0.5,  0, 1, 0,
+    -0.5, 0.5, 0.5,  0, 1, 0,   0.5, 0.5,-0.5,  0, 1, 0,  -0.5, 0.5,-0.5,  0, 1, 0,
+    // -Y face
+    -0.5,-0.5,-0.5,  0,-1, 0,   0.5,-0.5,-0.5,  0,-1, 0,   0.5,-0.5, 0.5,  0,-1, 0,
+    -0.5,-0.5,-0.5,  0,-1, 0,   0.5,-0.5, 0.5,  0,-1, 0,  -0.5,-0.5, 0.5,  0,-1, 0,
+  ])
+}
 
 // --- Constants ---
 
-const MAX_CUBES = 10000
+const INITIAL_CAPACITY = 10000
 const UBO_STRIDE = 256 // must be >= minUniformBufferOffsetAlignment
 const FLOAT_STRIDE = UBO_STRIDE / 4
 
@@ -100,12 +102,20 @@ function mat4Mul(out: Float32Array, a: Float32Array, b: Float32Array) {
   }
 }
 
-// --- Cube state ---
+function mat4RotYXTranslation(out: Float32Array, rx: number, ry: number, tx: number, ty: number, tz: number) {
+  const sx = Math.sin(rx), cx = Math.cos(rx)
+  const sy = Math.sin(ry), cy = Math.cos(ry)
+  out[0] = cy;      out[1] = 0;   out[2] = -sy;     out[3] = 0
+  out[4] = sy * sx; out[5] = cx;  out[6] = cy * sx;  out[7] = 0
+  out[8] = sy * cx; out[9] = -sx; out[10] = cy * cx; out[11] = 0
+  out[12] = tx;     out[13] = ty; out[14] = tz;      out[15] = 1
+}
 
-interface CubeState {
-  x: number; y: number; z: number
-  rx: number; ry: number
-  r: number; g: number; b: number
+// --- Mesh handle: views into the staging buffer ---
+
+interface MeshHandle {
+  modelMatrix: Float32Array // 16-float subarray
+  color: Float32Array       // 4-float subarray
 }
 
 // --- Engine ---
@@ -116,13 +126,17 @@ export class ExperimentAAdapter implements EngineAdapter {
   private pipeline!: GPURenderPipeline
   private depthTexture!: GPUTexture
   private vertexBuffer!: GPUBuffer
+  private vertexCount = 0
   private cameraBuffer!: GPUBuffer
-  private cubeBuffer!: GPUBuffer
+  private instanceBuffer!: GPUBuffer
   private cameraBindGroup!: GPUBindGroup
-  private cubeBindGroup!: GPUBindGroup
+  private instanceBindGroup!: GPUBindGroup
+  private instanceLayout!: GPUBindGroupLayout
 
-  private cubes: CubeState[] = []
-  private staging = new ArrayBuffer(MAX_CUBES * UBO_STRIDE)
+  private meshes: MeshHandle[] = []
+  private meshCount = 0
+  private capacity = INITIAL_CAPACITY
+  private staging = new ArrayBuffer(INITIAL_CAPACITY * UBO_STRIDE)
   private stagingF32 = new Float32Array(this.staging)
 
   private canvas!: HTMLCanvasElement
@@ -141,6 +155,9 @@ export class ExperimentAAdapter implements EngineAdapter {
   private useCase: UseCase = 'boxes'
   private depthW = 0
   private depthH = 0
+
+  // Benchmark-specific animation state
+  private animStates: Array<{ x: number; y: number; z: number; rx: number; ry: number }> = []
 
   async init(canvas: HTMLCanvasElement, backend: BackendType, useCase: UseCase) {
     if (backend !== 'webgpu') throw new Error('Experiment A supports WebGPU only')
@@ -161,22 +178,15 @@ export class ExperimentAAdapter implements EngineAdapter {
 
     this.context.configure({ device: this.device, format, alphaMode: 'premultiplied' })
 
-    // Vertex buffer
-    this.vertexBuffer = this.device.createBuffer({
-      size: CUBE_VERTS.byteLength,
-      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
-    })
-    this.device.queue.writeBuffer(this.vertexBuffer, 0, CUBE_VERTS)
-
     // Camera uniform (mat4x4f = 64 bytes)
     this.cameraBuffer = this.device.createBuffer({
       size: 64,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
 
-    // Per-cube dynamic uniform buffer
-    this.cubeBuffer = this.device.createBuffer({
-      size: MAX_CUBES * UBO_STRIDE,
+    // Per-instance dynamic uniform buffer
+    this.instanceBuffer = this.device.createBuffer({
+      size: this.capacity * UBO_STRIDE,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
 
@@ -184,7 +194,7 @@ export class ExperimentAAdapter implements EngineAdapter {
     const cameraLayout = this.device.createBindGroupLayout({
       entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } }],
     })
-    const cubeLayout = this.device.createBindGroupLayout({
+    this.instanceLayout = this.device.createBindGroupLayout({
       entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform', hasDynamicOffset: true } }],
     })
 
@@ -192,18 +202,18 @@ export class ExperimentAAdapter implements EngineAdapter {
       layout: cameraLayout,
       entries: [{ binding: 0, resource: { buffer: this.cameraBuffer } }],
     })
-    this.cubeBindGroup = this.device.createBindGroup({
-      layout: cubeLayout,
-      entries: [{ binding: 0, resource: { buffer: this.cubeBuffer, size: 80 } }],
+    this.instanceBindGroup = this.device.createBindGroup({
+      layout: this.instanceLayout,
+      entries: [{ binding: 0, resource: { buffer: this.instanceBuffer, size: 80 } }],
     })
 
     // Depth texture
     this.ensureDepthTexture()
 
-    // Pipeline
+    // Pipeline (vertex layout: stride=24, pos float32x3 + normal float32x3)
     const shaderModule = this.device.createShaderModule({ code: SHADER })
     this.pipeline = this.device.createRenderPipeline({
-      layout: this.device.createPipelineLayout({ bindGroupLayouts: [cameraLayout, cubeLayout] }),
+      layout: this.device.createPipelineLayout({ bindGroupLayouts: [cameraLayout, this.instanceLayout] }),
       vertex: {
         module: shaderModule,
         entryPoint: 'vs',
@@ -278,26 +288,88 @@ export class ExperimentAAdapter implements EngineAdapter {
     this.ensureDepthTexture()
   }
 
+  // --- General-purpose: geometry ---
+
+  setGeometry(vertices: Float32Array, vertexCount: number) {
+    if (this.vertexBuffer) this.vertexBuffer.destroy()
+    this.vertexBuffer = this.device.createBuffer({
+      size: vertices.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    })
+    this.device.queue.writeBuffer(this.vertexBuffer, 0, vertices)
+    this.vertexCount = vertexCount
+  }
+
+  // --- General-purpose: mesh capacity ---
+
+  private ensureCapacity(count: number) {
+    if (count <= this.capacity) return
+    this.capacity = count
+    const newStaging = new ArrayBuffer(count * UBO_STRIDE)
+    const newF32 = new Float32Array(newStaging)
+    // Copy existing data (preserves transforms and colors)
+    newF32.set(new Float32Array(this.staging, 0, Math.min(this.staging.byteLength, newStaging.byteLength) / 4))
+    this.staging = newStaging
+    this.stagingF32 = newF32
+    // Rebuild mesh handle views into new buffer
+    for (let i = 0; i < this.meshes.length; i++) {
+      const o = i * FLOAT_STRIDE
+      this.meshes[i].modelMatrix = newF32.subarray(o, o + 16)
+      this.meshes[i].color = newF32.subarray(o + 16, o + 20)
+    }
+    // Recreate GPU buffer + bind group
+    this.instanceBuffer.destroy()
+    this.instanceBuffer = this.device.createBuffer({
+      size: count * UBO_STRIDE,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    })
+    this.instanceBindGroup = this.device.createBindGroup({
+      layout: this.instanceLayout,
+      entries: [{ binding: 0, resource: { buffer: this.instanceBuffer, size: 80 } }],
+    })
+  }
+
   // --- EngineAdapter interface ---
 
   setMeshCount(count: number) {
     if (this.useCase !== 'boxes') return
-    if (count > MAX_CUBES) count = MAX_CUBES
 
-    if (this.cubes.length > count) {
-      this.cubes.length = count
+    // Set box geometry on first call
+    if (!this.vertexCount) {
+      this.setGeometry(createBoxGeometry(), 36)
     }
 
+    this.ensureCapacity(count)
+
     const spread = 50
-    while (this.cubes.length < count) {
-      this.cubes.push({
+    while (this.meshes.length < count) {
+      const i = this.meshes.length
+      const o = i * FLOAT_STRIDE
+      const handle: MeshHandle = {
+        modelMatrix: this.stagingF32.subarray(o, o + 16),
+        color: this.stagingF32.subarray(o + 16, o + 20),
+      }
+      handle.color[0] = Math.random()
+      handle.color[1] = Math.random()
+      handle.color[2] = Math.random()
+      handle.color[3] = 1
+      this.meshes.push(handle)
+
+      // Benchmark-specific: box animation state
+      this.animStates.push({
         x: (Math.random() - 0.5) * spread,
         y: (Math.random() - 0.5) * spread,
         z: (Math.random() - 0.5) * spread,
         rx: 0, ry: 0,
-        r: Math.random(), g: Math.random(), b: Math.random(),
       })
     }
+
+    if (this.meshes.length > count) {
+      this.meshes.length = count
+      this.animStates.length = count
+    }
+
+    this.meshCount = count
   }
 
   setShadows(_enabled: boolean) {
@@ -305,7 +377,7 @@ export class ExperimentAAdapter implements EngineAdapter {
   }
 
   render(dt: number) {
-    if (this.useCase !== 'boxes' || this.cubes.length === 0) return
+    if (this.useCase !== 'boxes' || this.meshCount === 0) return
 
     this.onResize() // cheap no-op if size unchanged thanks to ensureDepthTexture guard
 
@@ -323,33 +395,19 @@ export class ExperimentAAdapter implements EngineAdapter {
     mat4Mul(this.vpMatrix, this.projMatrix, this.viewMatrix)
     this.device.queue.writeBuffer(this.cameraBuffer, 0, this.vpMatrix)
 
-    // Update per-cube transforms into staging buffer
-    const f = this.stagingF32
-    const n = this.cubes.length
+    // Benchmark-specific: animate boxes (writes directly into staging via mesh handles)
     const speed = 1.0
-
-    for (let i = 0; i < n; i++) {
-      const c = this.cubes[i]
-      c.rx += speed * dt
-      c.ry += speed * dt * 0.7
-
-      const sx = Math.sin(c.rx), cx = Math.cos(c.rx)
-      const sy = Math.sin(c.ry), cy = Math.cos(c.ry)
-      const o = i * FLOAT_STRIDE
-
-      // Model = Translation * RotY * RotX  (column-major)
-      f[o     ] = cy;      f[o +  1] = 0;   f[o +  2] = -sy;     f[o +  3] = 0
-      f[o +  4] = sy * sx; f[o +  5] = cx;  f[o +  6] = cy * sx; f[o +  7] = 0
-      f[o +  8] = sy * cx; f[o +  9] = -sx; f[o + 10] = cy * cx; f[o + 11] = 0
-      f[o + 12] = c.x;     f[o + 13] = c.y; f[o + 14] = c.z;     f[o + 15] = 1
-
-      // Color (vec4f at byte offset 64)
-      f[o + 16] = c.r; f[o + 17] = c.g; f[o + 18] = c.b; f[o + 19] = 1
+    for (let i = 0; i < this.meshCount; i++) {
+      const s = this.animStates[i]
+      s.rx += speed * dt
+      s.ry += speed * dt * 0.7
+      mat4RotYXTranslation(this.meshes[i].modelMatrix, s.rx, s.ry, s.x, s.y, s.z)
     }
 
-    this.device.queue.writeBuffer(this.cubeBuffer, 0, this.staging, 0, n * UBO_STRIDE)
+    // General: upload all mesh data (single writeBuffer for all instances)
+    this.device.queue.writeBuffer(this.instanceBuffer, 0, this.staging, 0, this.meshCount * UBO_STRIDE)
 
-    // Encode render pass
+    // General: encode render pass
     const encoder = this.device.createCommandEncoder()
     const pass = encoder.beginRenderPass({
       colorAttachments: [{
@@ -370,9 +428,9 @@ export class ExperimentAAdapter implements EngineAdapter {
     pass.setVertexBuffer(0, this.vertexBuffer)
     pass.setBindGroup(0, this.cameraBindGroup)
 
-    for (let i = 0; i < n; i++) {
-      pass.setBindGroup(1, this.cubeBindGroup, [i * UBO_STRIDE])
-      pass.draw(36)
+    for (let i = 0; i < this.meshCount; i++) {
+      pass.setBindGroup(1, this.instanceBindGroup, [i * UBO_STRIDE])
+      pass.draw(this.vertexCount)
     }
 
     pass.end()
@@ -387,10 +445,11 @@ export class ExperimentAAdapter implements EngineAdapter {
     window.removeEventListener('resize', this.onResize)
     this.vertexBuffer?.destroy()
     this.cameraBuffer?.destroy()
-    this.cubeBuffer?.destroy()
+    this.instanceBuffer?.destroy()
     this.depthTexture?.destroy()
     this.device?.destroy()
-    this.cubes = []
+    this.meshes = []
+    this.animStates = []
   }
 
   getInfo() {
