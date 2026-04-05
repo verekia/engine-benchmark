@@ -34,6 +34,10 @@ async function loadAdapter(engine: EngineName): Promise<EngineAdapter> {
       const { VoidcoreAdapter } = await import('./engines/voidcore')
       return new VoidcoreAdapter()
     }
+    case 'nanothree': {
+      const { NanoThreeAdapter } = await import('./engines/nanothree')
+      return new NanoThreeAdapter()
+    }
     case 'experiment-a': {
       const { ExperimentAAdapter } = await import('./engines/experiment-a')
       return new ExperimentAAdapter()
@@ -123,7 +127,7 @@ gui.domElement.style.position = 'fixed'
 gui.domElement.style.top = '0'
 gui.domElement.style.right = '0'
 
-gui.add(params, 'engine', ['threejs', 'playcanvas', 'babylonjs', 'voidcore', 'experiment-a', 'experiment-b', 'experiment-c']).name('Engine').onChange(() => restart())
+gui.add(params, 'engine', ['threejs', 'playcanvas', 'babylonjs', 'voidcore', 'nanothree', 'experiment-a', 'experiment-b', 'experiment-c']).name('Engine').onChange(() => restart())
 gui.add(params, 'backend', ['webgl', 'webgpu']).name('Backend').onChange(() => restart())
 gui.add(params, 'useCase', ['boxes', 'skinned-mesh', 'unique-tetrahedra']).name('Use Case').onChange(() => {
   if (params.useCase === 'skinned-mesh') {
