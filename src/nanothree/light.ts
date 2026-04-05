@@ -13,12 +13,27 @@ export class AmbientLight extends Object3D {
   }
 }
 
+export class ShadowMapSize {
+  width = 2048
+  height = 2048
+  set(w: number, h: number) { this.width = w; this.height = h }
+}
+
+export class ShadowCamera {
+  near = 0.5
+  far = 200
+  left = -60
+  right = 60
+  top = 60
+  bottom = -60
+}
+
 export class DirectionalLight extends Object3D {
   color: Color
   intensity: number
   readonly shadow = {
-    mapSize: { set(_w: number, _h: number) {} },
-    camera: { near: 0.5, far: 200, left: -60, right: 60, top: 60, bottom: -60 },
+    mapSize: new ShadowMapSize(),
+    camera: new ShadowCamera(),
   }
 
   constructor(color: number | Color = 0xffffff, intensity = 1) {

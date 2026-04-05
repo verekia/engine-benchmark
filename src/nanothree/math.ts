@@ -47,6 +47,25 @@ export function mat4Multiply(out: Float32Array, a: Float32Array, b: Float32Array
   }
 }
 
+// WebGPU orthographic projection (Z maps to [0, 1])
+export function mat4Ortho(
+  out: Float32Array,
+  left: number, right: number,
+  bottom: number, top: number,
+  near: number, far: number,
+) {
+  const lr = 1 / (left - right)
+  const bt = 1 / (bottom - top)
+  const nf = 1 / (near - far)
+  out[0] = -2 * lr; out[1] = 0; out[2] = 0; out[3] = 0
+  out[4] = 0; out[5] = -2 * bt; out[6] = 0; out[7] = 0
+  out[8] = 0; out[9] = 0; out[10] = nf; out[11] = 0
+  out[12] = (left + right) * lr
+  out[13] = (top + bottom) * bt
+  out[14] = near * nf
+  out[15] = 1
+}
+
 export function mat4FromEulerXYZ(out: Float32Array, rx: number, ry: number, rz: number) {
   const cx = Math.cos(rx), sx = Math.sin(rx)
   const cy = Math.cos(ry), sy = Math.sin(ry)

@@ -19,6 +19,8 @@ struct Scene {
   lightDir: vec4f,
   ambient: vec4f,
   lightColor: vec4f,
+  lightViewProj: mat4x4f,
+  shadowParams: vec4f,  // x: enabled, y: bias, z: texelSize
 }
 
 struct ObjectData {
@@ -27,6 +29,8 @@ struct ObjectData {
 }
 
 @group(0) @binding(0) var<uniform> scene: Scene;
+@group(0) @binding(1) var shadowMap: texture_depth_2d;
+@group(0) @binding(2) var shadowSampler: sampler_comparison;
 @group(1) @binding(0) var<storage, read> objectData: ObjectData;
 `
 
