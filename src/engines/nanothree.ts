@@ -128,6 +128,8 @@ export class NanoThreeAdapter implements EngineAdapter {
         (Math.random() - 0.5) * spread,
         (Math.random() - 0.5) * spread,
       )
+      mesh.castShadow = this.shadowsEnabled
+      mesh.receiveShadow = this.shadowsEnabled
       this.scene.add(mesh)
 
       this.boxes.push({
@@ -156,6 +158,8 @@ export class NanoThreeAdapter implements EngineAdapter {
       const mesh = new Mesh(geometry, material)
       mesh.position.set(...spec.position)
       mesh.rotation.set(...spec.rotation)
+      mesh.castShadow = this.shadowsEnabled
+      mesh.receiveShadow = this.shadowsEnabled
       this.scene.add(mesh)
 
       this.tetrahedra.push({
@@ -167,8 +171,19 @@ export class NanoThreeAdapter implements EngineAdapter {
     }
   }
 
-  setShadows(_enabled: boolean) {
-    // Shadows not yet implemented in nanothree
+  setShadows(enabled: boolean) {
+    this.shadowsEnabled = enabled
+    this.renderer.shadowMap.enabled = enabled
+    this.dirLight.castShadow = enabled
+
+    for (const box of this.boxes) {
+      box.mesh.castShadow = enabled
+      box.mesh.receiveShadow = enabled
+    }
+    for (const tetra of this.tetrahedra) {
+      tetra.mesh.castShadow = enabled
+      tetra.mesh.receiveShadow = enabled
+    }
   }
 
   render(dt: number) {
