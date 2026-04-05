@@ -461,45 +461,22 @@ export class WebGPURenderer {
 
   setPixelRatio(_r: number) {}
 
-  private writeObjectData(
-    idx: number,
-    px: number, py: number, pz: number,
-    rx: number, ry: number, rz: number,
-    scx: number, scy: number, scz: number,
-    cr: number, cg: number, cb: number,
-  ) {
+  /** Copy pre-computed world matrix + color into the object staging buffer. */
+  private writeObjectData(idx: number, worldMatrix: Float32Array, cr: number, cg: number, cb: number) {
     const off = idx * this.objectFloatStride
-    const s = this.objectStaging
-    const cx = Math.cos(rx), sx = Math.sin(rx)
-    const cy = Math.cos(ry), sy = Math.sin(ry)
-    const cz = Math.cos(rz), sz = Math.sin(rz)
-    s[off]     = (cz * cy) * scx
-    s[off + 1] = (sz * cy) * scx
-    s[off + 2] = (-sy) * scx
-    s[off + 3] = 0
-    s[off + 4] = (cz * sy * sx - sz * cx) * scy
-    s[off + 5] = (sz * sy * sx + cz * cx) * scy
-    s[off + 6] = (cy * sx) * scy
-    s[off + 7] = 0
-    s[off + 8] = (cz * sy * cx + sz * sx) * scz
-    s[off + 9] = (sz * sy * cx - cz * sx) * scz
-    s[off + 10] = (cy * cx) * scz
-    s[off + 11] = 0
-    s[off + 12] = px; s[off + 13] = py; s[off + 14] = pz; s[off + 15] = 1
-    s[off + 16] = cr; s[off + 17] = cg; s[off + 18] = cb; s[off + 19] = 1
-  }
-
-  private writeMeshObjectData(idx: number, m: Mesh) {
-    this.writeObjectData(idx,
-      m.position.x, m.position.y, m.position.z,
-      m.rotation.x, m.rotation.y, m.rotation.z,
-      m.scale.x, m.scale.y, m.scale.z,
-      m.material.color.r, m.material.color.g, m.material.color.b)
+    this.objectStaging.set(worldMatrix, off)
+    this.objectStaging[off + 16] = cr
+    this.objectStaging[off + 17] = cg
+    this.objectStaging[off + 18] = cb
+    this.objectStaging[off + 19] = 1
   }
 
   // ── Main render ───────────────────────────────────────────────────
 
   render(scene: Scene, camera: PerspectiveCamera) {
+    // Single-pass traversal: compute world matrices + collect renderables
+    scene.updateMatrixWorld()
+
     const solidMeshes: Mesh[] = []
     const wireframeMeshes: Mesh[] = []
     const customMeshes: Mesh[] = []
@@ -507,13 +484,12 @@ export class WebGPURenderer {
 
     for (let i = 0; i < scene.meshes.length; i++) {
       const m = scene.meshes[i]
-      if (!m.visible) continue
       if (m.material instanceof ShaderMaterial) customMeshes.push(m)
       else if (m.material.wireframe) wireframeMeshes.push(m)
       else solidMeshes.push(m)
     }
     for (let i = 0; i < scene.lines.length; i++)
-      if (scene.lines[i].visible) lines.push(scene.lines[i])
+      lines.push(scene.lines[i])
 
     const solidCount = solidMeshes.length
     const wireCount = wireframeMeshes.length
@@ -559,17 +535,23 @@ export class WebGPURenderer {
     sd[44] = shadowsOn ? 1 : 0; sd[45] = SHADOW_BIAS; sd[46] = 1 / SHADOW_MAP_SIZE; sd[47] = 0
     this.device.queue.writeBuffer(this.sceneBuffer, 0, sd)
 
-    // ── Stage object data ───────────────────────────────────────
+    // ── Stage object data (world matrices already computed by updateMatrixWorld) ──
     let idx = 0
-    for (let i = 0; i < solidCount; i++, idx++) this.writeMeshObjectData(idx, solidMeshes[i])
-    for (let i = 0; i < wireCount; i++, idx++) this.writeMeshObjectData(idx, wireframeMeshes[i])
-    for (let i = 0; i < customCount; i++, idx++) this.writeMeshObjectData(idx, customMeshes[i])
+    for (let i = 0; i < solidCount; i++, idx++) {
+      const m = solidMeshes[i]
+      this.writeObjectData(idx, m._worldMatrix, m.material.color.r, m.material.color.g, m.material.color.b)
+    }
+    for (let i = 0; i < wireCount; i++, idx++) {
+      const m = wireframeMeshes[i]
+      this.writeObjectData(idx, m._worldMatrix, m.material.color.r, m.material.color.g, m.material.color.b)
+    }
+    for (let i = 0; i < customCount; i++, idx++) {
+      const m = customMeshes[i]
+      this.writeObjectData(idx, m._worldMatrix, m.material.color.r, m.material.color.g, m.material.color.b)
+    }
     for (let i = 0; i < lineCount; i++, idx++) {
       const l = lines[i]
-      this.writeObjectData(idx, l.position.x, l.position.y, l.position.z,
-        l.rotation.x, l.rotation.y, l.rotation.z,
-        l.scale.x, l.scale.y, l.scale.z,
-        l.material.color.r, l.material.color.g, l.material.color.b)
+      this.writeObjectData(idx, l._worldMatrix, l.material.color.r, l.material.color.g, l.material.color.b)
     }
     this.device.queue.writeBuffer(this.objectBuffer, 0, this.objectStaging.buffer, 0, totalCount * this.objectStride)
 

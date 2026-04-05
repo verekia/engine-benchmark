@@ -1,4 +1,4 @@
-export { Color, Vector3, Euler, Object3D, PerspectiveCamera } from './core'
+export { Color, Vector3, Euler, Object3D, Group, PerspectiveCamera } from './core'
 export { BufferGeometry, BoxGeometry, TetrahedronGeometry, Float32BufferAttribute } from './geometry'
 export { MeshLambertMaterial, LineBasicMaterial } from './material'
 export { ShaderMaterial, SHADER_PREAMBLE } from './shader-material'

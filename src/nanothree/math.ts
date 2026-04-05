@@ -87,3 +87,36 @@ export function mat4FromEulerXYZ(out: Float32Array, rx: number, ry: number, rz: 
   out[14] = 0
   out[15] = 1
 }
+
+/** Compose a TRS (translate, rotate XYZ euler, scale) matrix directly into out. */
+export function mat4ComposeTRS(
+  out: Float32Array,
+  px: number, py: number, pz: number,
+  rx: number, ry: number, rz: number,
+  sx: number, sy: number, sz: number,
+) {
+  const cx = Math.cos(rx), snx = Math.sin(rx)
+  const cy = Math.cos(ry), sy2 = Math.sin(ry)
+  const cz = Math.cos(rz), snz = Math.sin(rz)
+  out[0]  = (cz * cy) * sx
+  out[1]  = (snz * cy) * sx
+  out[2]  = (-sy2) * sx
+  out[3]  = 0
+  out[4]  = (cz * sy2 * snx - snz * cx) * sy
+  out[5]  = (snz * sy2 * snx + cz * cx) * sy
+  out[6]  = (cy * snx) * sy
+  out[7]  = 0
+  out[8]  = (cz * sy2 * cx + snz * snx) * sz
+  out[9]  = (snz * sy2 * cx - cz * snx) * sz
+  out[10] = (cy * cx) * sz
+  out[11] = 0
+  out[12] = px; out[13] = py; out[14] = pz; out[15] = 1
+}
+
+/** Set out to identity. */
+export function mat4Identity(out: Float32Array) {
+  out[0] = 1; out[1] = 0; out[2] = 0; out[3] = 0
+  out[4] = 0; out[5] = 1; out[6] = 0; out[7] = 0
+  out[8] = 0; out[9] = 0; out[10] = 1; out[11] = 0
+  out[12] = 0; out[13] = 0; out[14] = 0; out[15] = 1
+}
