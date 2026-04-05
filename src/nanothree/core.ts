@@ -69,6 +69,7 @@ export class Object3D {
   readonly position = new Vector3()
   readonly rotation = new Euler()
   readonly scale = new Vector3(1, 1, 1)
+  visible = true
   castShadow = false
   receiveShadow = false
 }
@@ -83,6 +84,10 @@ export class PerspectiveCamera extends Object3D {
   private view = new Float32Array(16)
   readonly viewProjection = new Float32Array(16)
   private target = new Vector3()
+
+  get fov() { return this._fov * (180 / Math.PI) }
+  get near() { return this._near }
+  get far() { return this._far }
 
   constructor(fov = 50, aspect = 1, near = 0.1, far = 2000) {
     super()

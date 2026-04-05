@@ -8,12 +8,19 @@
 // 4. Inline model matrix computation - no intermediate objects.
 // 5. Reused render pass descriptors and command encoder patterns.
 // 6. One draw call per mesh - no tricks, just a fast core.
+//
+// Three pipelines share the same bind group layouts and vertex buffer format:
+// - meshPipeline:      triangle-list, back-face culling, Lambert lit shader
+// - wireframePipeline: line-list, no culling, Lambert lit shader
+// - linePipeline:      line-list, no culling, unlit flat-color shader
 
 import type { PerspectiveCamera } from './core'
 import type { Scene } from './scene'
+import type { Mesh } from './mesh'
+import type { Line } from './line'
 import type { BufferGeometry } from './geometry'
 
-const SHADER = /* wgsl */ `
+const MESH_SHADER = /* wgsl */ `
 struct Scene {
   viewProj: mat4x4f,
   lightDir: vec4f,
@@ -53,16 +60,64 @@ struct VSOut {
 }
 `
 
+const LINE_SHADER = /* wgsl */ `
+struct Scene {
+  viewProj: mat4x4f,
+  lightDir: vec4f,
+  ambient: vec4f,
+  lightColor: vec4f,
+}
+
+struct ObjectData {
+  model: mat4x4f,
+  color: vec4f,
+}
+
+@group(0) @binding(0) var<uniform> scene: Scene;
+@group(1) @binding(0) var<storage, read> objectData: ObjectData;
+
+struct VSOut {
+  @builtin(position) pos: vec4f,
+  @location(0) color: vec3f,
+}
+
+@vertex fn vs(
+  @location(0) position: vec3f,
+  @location(1) _normal: vec3f,
+) -> VSOut {
+  var out: VSOut;
+  out.pos = scene.viewProj * objectData.model * vec4f(position, 1.0);
+  out.color = objectData.color.rgb;
+  return out;
+}
+
+@fragment fn fs(in: VSOut) -> @location(0) vec4f {
+  return vec4f(in.color, 1.0);
+}
+`
+
 // 20 floats per object: mat4x4 (16) + vec4 color (4)
 const OBJECT_FLOATS = 20
 const INITIAL_CAPACITY = 1024
+
+// Shared vertex buffer layout for all pipelines (interleaved pos+normal)
+const VERTEX_BUFFER_LAYOUT: GPUVertexBufferLayout = {
+  arrayStride: 24,
+  attributes: [
+    { shaderLocation: 0, offset: 0, format: 'float32x3' as GPUVertexFormat },
+    { shaderLocation: 1, offset: 12, format: 'float32x3' as GPUVertexFormat },
+  ],
+}
 
 export class WebGPURenderer {
   private device!: GPUDevice
   private context!: GPUCanvasContext
   private canvas: HTMLCanvasElement
 
-  private pipeline!: GPURenderPipeline
+  private meshPipeline!: GPURenderPipeline
+  private wireframePipeline!: GPURenderPipeline
+  private linePipeline!: GPURenderPipeline
+
   private depthTexture!: GPUTexture
   private depthView!: GPUTextureView
   private depthW = 0
@@ -80,7 +135,7 @@ export class WebGPURenderer {
   private objectFloatStride = 64
 
   // Pre-allocated CPU-side staging
-  private sceneData = new Float32Array(28) // viewProj(16) + lightDir(4) + ambient(4) + lightColor(4)
+  private sceneData = new Float32Array(28)
   private objectStaging!: Float32Array
   private capacity = INITIAL_CAPACITY
 
@@ -142,49 +197,65 @@ export class WebGPURenderer {
 
     this.objectStaging = new Float32Array(INITIAL_CAPACITY * this.objectFloatStride)
 
-    this.createPipeline(format)
+    this.createBindGroupLayouts()
+    this.createPipelines(format)
     this.createBuffers(INITIAL_CAPACITY)
     this.createBindGroups()
     this.ensureDepthTexture()
   }
 
-  private createPipeline(format: GPUTextureFormat) {
-    const shader = this.device.createShaderModule({ code: SHADER })
-
+  private createBindGroupLayouts() {
     this.sceneLayout = this.device.createBindGroupLayout({
       entries: [
         { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
       ],
     })
-
     this.objectLayout = this.device.createBindGroupLayout({
       entries: [
         { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage', hasDynamicOffset: true } },
       ],
     })
+  }
 
-    this.pipeline = this.device.createRenderPipeline({
-      layout: this.device.createPipelineLayout({
-        bindGroupLayouts: [this.sceneLayout, this.objectLayout],
-      }),
-      vertex: {
-        module: shader,
-        entryPoint: 'vs',
-        buffers: [{
-          arrayStride: 24, // 6 floats: pos(3) + normal(3)
-          attributes: [
-            { shaderLocation: 0, offset: 0, format: 'float32x3' as GPUVertexFormat },
-            { shaderLocation: 1, offset: 12, format: 'float32x3' as GPUVertexFormat },
-          ],
-        }],
-      },
-      fragment: {
-        module: shader,
-        entryPoint: 'fs',
-        targets: [{ format }],
-      },
+  private createPipelines(format: GPUTextureFormat) {
+    const pipelineLayout = this.device.createPipelineLayout({
+      bindGroupLayouts: [this.sceneLayout, this.objectLayout],
+    })
+
+    const meshShader = this.device.createShaderModule({ code: MESH_SHADER })
+    const lineShader = this.device.createShaderModule({ code: LINE_SHADER })
+
+    const depthStencil: GPUDepthStencilState = {
+      format: 'depth24plus',
+      depthWriteEnabled: true,
+      depthCompare: 'less',
+    }
+
+    // Solid mesh pipeline: triangle-list, back-face cull
+    this.meshPipeline = this.device.createRenderPipeline({
+      layout: pipelineLayout,
+      vertex: { module: meshShader, entryPoint: 'vs', buffers: [VERTEX_BUFFER_LAYOUT] },
+      fragment: { module: meshShader, entryPoint: 'fs', targets: [{ format }] },
       primitive: { topology: 'triangle-list', cullMode: 'back' },
-      depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
+      depthStencil,
+    })
+
+    // Wireframe pipeline: line-list, no cull, Lambert lit
+    this.wireframePipeline = this.device.createRenderPipeline({
+      layout: pipelineLayout,
+      vertex: { module: meshShader, entryPoint: 'vs', buffers: [VERTEX_BUFFER_LAYOUT] },
+      fragment: { module: meshShader, entryPoint: 'fs', targets: [{ format }] },
+      primitive: { topology: 'line-list', cullMode: 'none' },
+      depthStencil,
+    })
+
+    // Line pipeline: line-list, no cull, unlit flat color
+    this.linePipeline = this.device.createRenderPipeline({
+      layout: pipelineLayout,
+      vertex: { module: lineShader, entryPoint: 'vs', buffers: [VERTEX_BUFFER_LAYOUT] },
+      fragment: { module: lineShader, entryPoint: 'fs', targets: [{ format }] },
+      primitive: { topology: 'line-list', cullMode: 'none' },
+      depthStencil,
     })
   }
 
@@ -252,10 +323,64 @@ export class WebGPURenderer {
     // Handled internally
   }
 
+  // Write model matrix + color for one object into the staging buffer
+  private writeObjectData(
+    idx: number,
+    px: number, py: number, pz: number,
+    rx: number, ry: number, rz: number,
+    scx: number, scy: number, scz: number,
+    cr: number, cg: number, cb: number,
+  ) {
+    const off = idx * this.objectFloatStride
+    const staging = this.objectStaging
+    const cx = Math.cos(rx), sx = Math.sin(rx)
+    const cy = Math.cos(ry), sy = Math.sin(ry)
+    const cz = Math.cos(rz), sz = Math.sin(rz)
+
+    staging[off]     = (cz * cy) * scx
+    staging[off + 1] = (sz * cy) * scx
+    staging[off + 2] = (-sy) * scx
+    staging[off + 3] = 0
+    staging[off + 4] = (cz * sy * sx - sz * cx) * scy
+    staging[off + 5] = (sz * sy * sx + cz * cx) * scy
+    staging[off + 6] = (cy * sx) * scy
+    staging[off + 7] = 0
+    staging[off + 8] = (cz * sy * cx + sz * sx) * scz
+    staging[off + 9] = (sz * sy * cx - cz * sx) * scz
+    staging[off + 10] = (cy * cx) * scz
+    staging[off + 11] = 0
+    staging[off + 12] = px
+    staging[off + 13] = py
+    staging[off + 14] = pz
+    staging[off + 15] = 1
+    staging[off + 16] = cr
+    staging[off + 17] = cg
+    staging[off + 18] = cb
+    staging[off + 19] = 1
+  }
+
   render(scene: Scene, camera: PerspectiveCamera) {
-    const meshes = scene.meshes
-    const meshCount = meshes.length
-    if (meshCount === 0) return
+    // Classify visible meshes into solid vs wireframe, and collect visible lines
+    const solidMeshes: Mesh[] = []
+    const wireframeMeshes: Mesh[] = []
+    const lines: Line[] = []
+
+    for (let i = 0; i < scene.meshes.length; i++) {
+      const m = scene.meshes[i]
+      if (!m.visible) continue
+      if (m.material.wireframe) wireframeMeshes.push(m)
+      else solidMeshes.push(m)
+    }
+    for (let i = 0; i < scene.lines.length; i++) {
+      if (scene.lines[i].visible) lines.push(scene.lines[i])
+    }
+
+    const solidCount = solidMeshes.length
+    const wireCount = wireframeMeshes.length
+    const lineCount = lines.length
+    const totalCount = solidCount + wireCount + lineCount
+
+    if (totalCount === 0) return
 
     // Handle resize
     const dpr = window.devicePixelRatio
@@ -267,18 +392,13 @@ export class WebGPURenderer {
       this.ensureDepthTexture()
     }
 
-    // Ensure capacity
-    if (meshCount > this.capacity) {
-      this.grow(meshCount)
-    }
+    if (totalCount > this.capacity) this.grow(totalCount)
 
     // Update camera
     camera.updateViewProjection(w / h)
 
     // Write scene uniforms
     this.sceneData.set(camera.viewProjection, 0)
-
-    // Light direction (normalized)
     const dl = scene.directionalLights[0]
     if (dl) {
       const lx = dl.position.x, ly = dl.position.y, lz = dl.position.z
@@ -287,66 +407,51 @@ export class WebGPURenderer {
       this.sceneData[17] = ly / len
       this.sceneData[18] = lz / len
     }
-
-    // Ambient color
     const al = scene.ambientLights[0]
     if (al) {
       this.sceneData[20] = al.color.r * al.intensity
       this.sceneData[21] = al.color.g * al.intensity
       this.sceneData[22] = al.color.b * al.intensity
     }
-
-    // Directional light color
     if (dl) {
       this.sceneData[24] = dl.color.r * dl.intensity
       this.sceneData[25] = dl.color.g * dl.intensity
       this.sceneData[26] = dl.color.b * dl.intensity
     }
-
     this.device.queue.writeBuffer(this.sceneBuffer, 0, this.sceneData)
 
-    // Write per-object data into staging buffer
-    const staging = this.objectStaging
-    const floatStride = this.objectFloatStride
-
-    for (let i = 0; i < meshCount; i++) {
-      const mesh = meshes[i]
-      const off = i * floatStride
-
-      // Compute model matrix inline (Euler XYZ, with scale)
-      const rx = mesh.rotation.x, ry = mesh.rotation.y, rz = mesh.rotation.z
-      const cx = Math.cos(rx), sx = Math.sin(rx)
-      const cy = Math.cos(ry), sy = Math.sin(ry)
-      const cz = Math.cos(rz), sz = Math.sin(rz)
-      const scx = mesh.scale.x, scy = mesh.scale.y, scz = mesh.scale.z
-
-      staging[off]     = (cz * cy) * scx
-      staging[off + 1] = (sz * cy) * scx
-      staging[off + 2] = (-sy) * scx
-      staging[off + 3] = 0
-      staging[off + 4] = (cz * sy * sx - sz * cx) * scy
-      staging[off + 5] = (sz * sy * sx + cz * cx) * scy
-      staging[off + 6] = (cy * sx) * scy
-      staging[off + 7] = 0
-      staging[off + 8] = (cz * sy * cx + sz * sx) * scz
-      staging[off + 9] = (sz * sy * cx - cz * sx) * scz
-      staging[off + 10] = (cy * cx) * scz
-      staging[off + 11] = 0
-      staging[off + 12] = mesh.position.x
-      staging[off + 13] = mesh.position.y
-      staging[off + 14] = mesh.position.z
-      staging[off + 15] = 1
-      staging[off + 16] = mesh.material.color.r
-      staging[off + 17] = mesh.material.color.g
-      staging[off + 18] = mesh.material.color.b
-      staging[off + 19] = 1
+    // Write all object data contiguously: [solid meshes | wireframe meshes | lines]
+    let idx = 0
+    for (let i = 0; i < solidCount; i++, idx++) {
+      const m = solidMeshes[i]
+      this.writeObjectData(idx,
+        m.position.x, m.position.y, m.position.z,
+        m.rotation.x, m.rotation.y, m.rotation.z,
+        m.scale.x, m.scale.y, m.scale.z,
+        m.material.color.r, m.material.color.g, m.material.color.b)
+    }
+    for (let i = 0; i < wireCount; i++, idx++) {
+      const m = wireframeMeshes[i]
+      this.writeObjectData(idx,
+        m.position.x, m.position.y, m.position.z,
+        m.rotation.x, m.rotation.y, m.rotation.z,
+        m.scale.x, m.scale.y, m.scale.z,
+        m.material.color.r, m.material.color.g, m.material.color.b)
+    }
+    for (let i = 0; i < lineCount; i++, idx++) {
+      const l = lines[i]
+      this.writeObjectData(idx,
+        l.position.x, l.position.y, l.position.z,
+        l.rotation.x, l.rotation.y, l.rotation.z,
+        l.scale.x, l.scale.y, l.scale.z,
+        l.material.color.r, l.material.color.g, l.material.color.b)
     }
 
     // Upload all object data in one call
     this.device.queue.writeBuffer(
       this.objectBuffer, 0,
-      staging.buffer, 0,
-      meshCount * this.objectStride,
+      this.objectStaging.buffer, 0,
+      totalCount * this.objectStride,
     )
 
     // Begin render pass
@@ -355,26 +460,65 @@ export class WebGPURenderer {
 
     const encoder = this.device.createCommandEncoder()
     const pass = encoder.beginRenderPass(this.passDesc)
-
-    pass.setPipeline(this.pipeline)
     pass.setBindGroup(0, this.sceneBindGroup)
 
-    // One draw call per mesh, dynamic offset into the storage buffer
-    let currentGeometry: BufferGeometry | null = null
-    for (let i = 0; i < meshCount; i++) {
-      const mesh = meshes[i]
-      const geo = mesh.geometry
-
-      // Only rebind vertex/index buffers when geometry changes
-      if (geo !== currentGeometry) {
-        currentGeometry = geo
-        geo._ensureGPU(this.device)
-        pass.setVertexBuffer(0, geo._vertexBuffer!)
-        pass.setIndexBuffer(geo._indexBuffer!, 'uint16')
+    // --- Pass 1: solid meshes (triangle-list, Lambert lit) ---
+    if (solidCount > 0) {
+      pass.setPipeline(this.meshPipeline)
+      let curGeo: BufferGeometry | null = null
+      for (let i = 0; i < solidCount; i++) {
+        const geo = solidMeshes[i].geometry
+        if (geo !== curGeo) {
+          curGeo = geo
+          geo._ensureGPU(this.device)
+          pass.setVertexBuffer(0, geo._vertexBuffer!)
+          pass.setIndexBuffer(geo._indexBuffer!, 'uint16')
+        }
+        pass.setBindGroup(1, this.objectBindGroup, [i * this.objectStride])
+        pass.drawIndexed(geo._indexCount)
       }
+    }
 
-      pass.setBindGroup(1, this.objectBindGroup, [i * this.objectStride])
-      pass.drawIndexed(geo._indexCount)
+    // --- Pass 2: wireframe meshes (line-list, Lambert lit, wireframe indices) ---
+    if (wireCount > 0) {
+      pass.setPipeline(this.wireframePipeline)
+      const baseIdx = solidCount
+      let curGeo: BufferGeometry | null = null
+      for (let i = 0; i < wireCount; i++) {
+        const geo = wireframeMeshes[i].geometry
+        if (geo !== curGeo) {
+          curGeo = geo
+          geo._ensureWireframeGPU(this.device)
+          pass.setVertexBuffer(0, geo._vertexBuffer!)
+          pass.setIndexBuffer(geo._wireframeIndexBuffer!, 'uint16')
+        }
+        pass.setBindGroup(1, this.objectBindGroup, [(baseIdx + i) * this.objectStride])
+        pass.drawIndexed(geo._wireframeIndexCount)
+      }
+    }
+
+    // --- Pass 3: lines (line-list, unlit flat color) ---
+    if (lineCount > 0) {
+      pass.setPipeline(this.linePipeline)
+      const baseIdx = solidCount + wireCount
+      let curGeo: BufferGeometry | null = null
+      for (let i = 0; i < lineCount; i++) {
+        const geo = lines[i].geometry
+        if (geo !== curGeo) {
+          curGeo = geo
+          geo._ensureGPU(this.device)
+          pass.setVertexBuffer(0, geo._vertexBuffer!)
+          if (geo._indexBuffer) {
+            pass.setIndexBuffer(geo._indexBuffer, 'uint16')
+          }
+        }
+        pass.setBindGroup(1, this.objectBindGroup, [(baseIdx + i) * this.objectStride])
+        if (geo._indexCount > 0) {
+          pass.drawIndexed(geo._indexCount)
+        } else {
+          pass.draw(geo._vertexCount)
+        }
+      }
     }
 
     pass.end()

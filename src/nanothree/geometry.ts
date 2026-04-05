@@ -19,8 +19,14 @@ export class BufferGeometry {
   _vertexBuffer: GPUBuffer | null = null
   _indexBuffer: GPUBuffer | null = null
   _indexCount = 0
+  _vertexCount = 0
   _gpuDirty = true
   _device: GPUDevice | null = null
+
+  // Wireframe index buffer (lazily generated from triangle indices)
+  _wireframeIndexBuffer: GPUBuffer | null = null
+  _wireframeIndexCount = 0
+  _wireframeDirty = true
 
   setAttribute(name: string, attribute: Float32BufferAttribute) {
     if (name === 'position') {
@@ -29,6 +35,7 @@ export class BufferGeometry {
       this.normals = attribute.array
     }
     this._gpuDirty = true
+    this._wireframeDirty = true
     return this
   }
 
@@ -41,6 +48,7 @@ export class BufferGeometry {
       this.indices = new Uint16Array(indices)
     }
     this._gpuDirty = true
+    this._wireframeDirty = true
     return this
   }
 
@@ -49,10 +57,11 @@ export class BufferGeometry {
     this._device = device
 
     const positions = this.positions!
-    const normals = this.normals!
+    const normals = this.normals
     const vertexCount = positions.length / 3
+    this._vertexCount = vertexCount
 
-    // Interleave position + normal for better cache performance
+    // Interleave position + normal (normals default to 0 if absent)
     const interleaved = new Float32Array(vertexCount * 6)
     for (let i = 0; i < vertexCount; i++) {
       const i3 = i * 3
@@ -60,9 +69,11 @@ export class BufferGeometry {
       interleaved[i6] = positions[i3]
       interleaved[i6 + 1] = positions[i3 + 1]
       interleaved[i6 + 2] = positions[i3 + 2]
-      interleaved[i6 + 3] = normals[i3]
-      interleaved[i6 + 4] = normals[i3 + 1]
-      interleaved[i6 + 5] = normals[i3 + 2]
+      if (normals) {
+        interleaved[i6 + 3] = normals[i3]
+        interleaved[i6 + 4] = normals[i3 + 1]
+        interleaved[i6 + 5] = normals[i3 + 2]
+      }
     }
 
     if (this._vertexBuffer) this._vertexBuffer.destroy()
@@ -72,25 +83,64 @@ export class BufferGeometry {
     })
     device.queue.writeBuffer(this._vertexBuffer, 0, interleaved)
 
-    const idx = this.indices!
-    this._indexCount = idx.length
-    if (this._indexBuffer) this._indexBuffer.destroy()
-    this._indexBuffer = device.createBuffer({
-      size: idx.byteLength,
-      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
-    })
-    device.queue.writeBuffer(this._indexBuffer, 0, idx)
+    if (this.indices) {
+      const idx = this.indices
+      this._indexCount = idx.length
+      if (this._indexBuffer) this._indexBuffer.destroy()
+      this._indexBuffer = device.createBuffer({
+        size: idx.byteLength,
+        usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+      })
+      device.queue.writeBuffer(this._indexBuffer, 0, idx)
+    } else {
+      this._indexCount = 0
+      if (this._indexBuffer) {
+        this._indexBuffer.destroy()
+        this._indexBuffer = null
+      }
+    }
 
     this._gpuDirty = false
+  }
+
+  _ensureWireframeGPU(device: GPUDevice) {
+    this._ensureGPU(device)
+    if (!this._wireframeDirty && this._device === device) return
+    if (!this.indices) return
+
+    const triIndices = this.indices
+    const triCount = triIndices.length / 3
+    const wireIndices = new Uint16Array(triCount * 6)
+
+    for (let i = 0; i < triCount; i++) {
+      const i3 = i * 3
+      const a = triIndices[i3], b = triIndices[i3 + 1], c = triIndices[i3 + 2]
+      const i6 = i * 6
+      wireIndices[i6] = a;     wireIndices[i6 + 1] = b
+      wireIndices[i6 + 2] = b; wireIndices[i6 + 3] = c
+      wireIndices[i6 + 4] = c; wireIndices[i6 + 5] = a
+    }
+
+    this._wireframeIndexCount = wireIndices.length
+    if (this._wireframeIndexBuffer) this._wireframeIndexBuffer.destroy()
+    this._wireframeIndexBuffer = device.createBuffer({
+      size: wireIndices.byteLength,
+      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+    })
+    device.queue.writeBuffer(this._wireframeIndexBuffer, 0, wireIndices)
+    this._wireframeDirty = false
   }
 
   dispose() {
     this._vertexBuffer?.destroy()
     this._indexBuffer?.destroy()
+    this._wireframeIndexBuffer?.destroy()
     this._vertexBuffer = null
     this._indexBuffer = null
+    this._wireframeIndexBuffer = null
     this._device = null
     this._gpuDirty = true
+    this._wireframeDirty = true
   }
 }
 
