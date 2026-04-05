@@ -19,6 +19,7 @@ export class BufferGeometry {
   _vertexBuffer: GPUBuffer | null = null
   _indexBuffer: GPUBuffer | null = null
   _indexCount = 0
+  _indexFormat: GPUIndexFormat = 'uint16'
   _vertexCount = 0
   _gpuDirty = true
   _device: GPUDevice | null = null
@@ -26,6 +27,7 @@ export class BufferGeometry {
   // Wireframe index buffer (lazily generated from triangle indices)
   _wireframeIndexBuffer: GPUBuffer | null = null
   _wireframeIndexCount = 0
+  _wireframeIndexFormat: GPUIndexFormat = 'uint16'
   _wireframeDirty = true
 
   setAttribute(name: string, attribute: Float32BufferAttribute) {
@@ -86,6 +88,7 @@ export class BufferGeometry {
     if (this.indices) {
       const idx = this.indices
       this._indexCount = idx.length
+      this._indexFormat = idx instanceof Uint32Array ? 'uint32' : 'uint16'
       if (this._indexBuffer) this._indexBuffer.destroy()
       this._indexBuffer = device.createBuffer({
         size: idx.byteLength,
@@ -110,7 +113,9 @@ export class BufferGeometry {
 
     const triIndices = this.indices
     const triCount = triIndices.length / 3
-    const wireIndices = new Uint16Array(triCount * 6)
+    const use32 = triIndices instanceof Uint32Array
+    this._wireframeIndexFormat = use32 ? 'uint32' : 'uint16'
+    const wireIndices = use32 ? new Uint32Array(triCount * 6) : new Uint16Array(triCount * 6)
 
     for (let i = 0; i < triCount; i++) {
       const i3 = i * 3

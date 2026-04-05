@@ -592,7 +592,7 @@ export class WebGPURenderer {
         if (geo !== curGeo) {
           curGeo = geo; geo._ensureGPU(this.device)
           sp.setVertexBuffer(0, geo._vertexBuffer!)
-          sp.setIndexBuffer(geo._indexBuffer!, 'uint16')
+          sp.setIndexBuffer(geo._indexBuffer!, geo._indexFormat)
         }
         sp.setBindGroup(1, this.objectBindGroup, [i * this.objectStride])
         sp.drawIndexed(geo._indexCount)
@@ -606,7 +606,7 @@ export class WebGPURenderer {
         if (geo !== curGeo) {
           curGeo = geo; geo._ensureGPU(this.device)
           sp.setVertexBuffer(0, geo._vertexBuffer!)
-          sp.setIndexBuffer(geo._indexBuffer!, 'uint16')
+          sp.setIndexBuffer(geo._indexBuffer!, geo._indexFormat)
         }
         sp.setBindGroup(1, this.objectBindGroup, [(customBase + i) * this.objectStride])
         sp.drawIndexed(geo._indexCount)
@@ -629,7 +629,7 @@ export class WebGPURenderer {
         if (geo !== curGeo) {
           curGeo = geo; geo._ensureGPU(this.device)
           pass.setVertexBuffer(0, geo._vertexBuffer!)
-          pass.setIndexBuffer(geo._indexBuffer!, 'uint16')
+          pass.setIndexBuffer(geo._indexBuffer!, geo._indexFormat)
         }
         pass.setBindGroup(1, this.objectBindGroup, [i * this.objectStride])
         pass.drawIndexed(geo._indexCount)
@@ -646,7 +646,7 @@ export class WebGPURenderer {
         if (geo !== curGeo) {
           curGeo = geo; geo._ensureWireframeGPU(this.device)
           pass.setVertexBuffer(0, geo._vertexBuffer!)
-          pass.setIndexBuffer(geo._wireframeIndexBuffer!, 'uint16')
+          pass.setIndexBuffer(geo._wireframeIndexBuffer!, geo._wireframeIndexFormat)
         }
         pass.setBindGroup(1, this.objectBindGroup, [(base + i) * this.objectStride])
         pass.drawIndexed(geo._wireframeIndexCount)
@@ -668,10 +668,10 @@ export class WebGPURenderer {
           curGeo = geo
           if (mat.wireframe) {
             geo._ensureWireframeGPU(this.device)
-            pass.setVertexBuffer(0, geo._vertexBuffer!); pass.setIndexBuffer(geo._wireframeIndexBuffer!, 'uint16')
+            pass.setVertexBuffer(0, geo._vertexBuffer!); pass.setIndexBuffer(geo._wireframeIndexBuffer!, geo._wireframeIndexFormat)
           } else {
             geo._ensureGPU(this.device)
-            pass.setVertexBuffer(0, geo._vertexBuffer!); pass.setIndexBuffer(geo._indexBuffer!, 'uint16')
+            pass.setVertexBuffer(0, geo._vertexBuffer!); pass.setIndexBuffer(geo._indexBuffer!, geo._indexFormat)
           }
         }
         pass.setBindGroup(1, this.objectBindGroup, [(base + i) * this.objectStride])
@@ -690,7 +690,7 @@ export class WebGPURenderer {
         if (geo !== curGeo) {
           curGeo = geo; geo._ensureGPU(this.device)
           pass.setVertexBuffer(0, geo._vertexBuffer!)
-          if (geo._indexBuffer) pass.setIndexBuffer(geo._indexBuffer, 'uint16')
+          if (geo._indexBuffer) pass.setIndexBuffer(geo._indexBuffer, geo._indexFormat)
         }
         pass.setBindGroup(1, this.objectBindGroup, [(base + i) * this.objectStride])
         if (geo._indexCount > 0) pass.drawIndexed(geo._indexCount)

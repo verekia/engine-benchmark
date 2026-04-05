@@ -97,6 +97,10 @@ export class PerspectiveCamera extends Object3D {
     this._far = far
   }
 
+  lookAt(x: number, y: number, z: number) {
+    this.target.set(x, y, z)
+  }
+
   updateProjectionMatrix() {
     // Projection will be recalculated on next updateViewProjection
   }
